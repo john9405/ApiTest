@@ -84,7 +84,7 @@ def _create_tool_icon(size=30):
     return image
 
 
-class CanvasSidebarTabs(ttk.Frame):
+class CanvasSidebarTabs:
     NAV_WIDTH = 44
     BUTTON_SIZE = 28
     BUTTON_GAP = 20
@@ -96,23 +96,20 @@ class CanvasSidebarTabs(ttk.Frame):
     INACTIVE_FG = "#52606d"
     BORDER_COLOR = "#c8d0d8"
 
-    def __init__(self, master):
-        super().__init__(master)
-        self.body = ttk.Frame(self)
+    def __init__(self, canvas_master, body_master):
+        self.body = ttk.Frame(body_master)
         self._tabs = []
         self._current_index = None
         self._regions = []
 
         self.nav_canvas = tk.Canvas(
-            self,
+            canvas_master,
             width=self.NAV_WIDTH,
             background=self.NAV_BG,
             borderwidth=0,
             highlightthickness=0,
         )
-        self.nav_canvas.pack(side=tk.LEFT, fill=tk.Y)
-        ttk.Separator(self, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y)
-        self.body.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.nav_canvas.pack(fill=tk.Y, expand=False)
 
         self.nav_canvas.bind("<Configure>", self._on_configure)
         self.nav_canvas.bind("<Button-1>", self._on_click)
@@ -544,14 +541,22 @@ class MainWindow:
             {"label": "Timestamp", "ui": TimestampWindow, "text": "Timestamp"},
         ]
 
-        panel_window = ttk.PanedWindow(self.root, orient="horizontal")
+        main_frame = ttk.Frame(self.root)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        sidebar_frame = ttk.Frame(main_frame)
+        sidebar_frame.pack(side=tk.LEFT, fill=tk.Y)
+        ttk.Separator(main_frame, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y)
+        content_frame = ttk.Frame(main_frame)
+        content_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        panel_window = ttk.PanedWindow(content_frame, orient="horizontal")
         self.sidebar_icons = {
             "col": _create_folder_icon(size=28),
             "env": _create_env_icon(size=28),
             "his": _create_history_icon(size=28),
             "tool": _create_tool_icon(size=28),
         }
-        nba = CanvasSidebarTabs(panel_window)
+        nba = CanvasSidebarTabs(sidebar_frame, panel_window)
         col_top = ttk.Frame(nba.body)
         self.col_win = CollectionWindow(col_top, **{"callback": self.collection})
         nba.add(col_top, text="Col", image=self.sidebar_icons["col"])
@@ -562,7 +567,7 @@ class MainWindow:
         nba.add(history_top, text="His", image=self.sidebar_icons["his"])
         tool_top = ToolListFrame(nba.body, self.tool_entries, self.new_tab)
         nba.add(tool_top, text="工具", image=self.sidebar_icons["tool"])
-        panel_window.add(nba, weight=1)
+        panel_window.add(nba.body, weight=1)
         nbb = CanvasNotebook(panel_window, add_command=self.new_request, close_command=self.close_tab)
         self.nbb = nbb
         panel_window.add(nbb, weight=10)
