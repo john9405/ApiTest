@@ -32,7 +32,7 @@ from bs4 import BeautifulSoup
 from PIL import Image, ImageTk
 
 from .dao.crud import update_request
-from .utils import EditorTable
+from .utils import EditorTable, CodeEditor
 
 
 class ParamsFrame(EditorTable):
@@ -66,12 +66,11 @@ class ParamsFrame(EditorTable):
 
 
 class OauthFrame(ttk.Frame):
-    main_frame = None
-    rsa_key_text = None
-
     def __init__(self, master=None, **kw):
         super().__init__(master, **kw)
 
+        self.main_frame = None
+        self.rsa_key_text = None
         self.client_key = tk.StringVar(self)
         self.client_secret = tk.StringVar(self)
         self.resource_owner_key = tk.StringVar(self)
@@ -80,25 +79,56 @@ class OauthFrame(ttk.Frame):
         self.signature_method = tk.StringVar(self, value=SIGNATURE_HMAC_SHA1)
         self.signature_method.trace_add("write", self.change_page)
         self.cpage = "hmac_page"
-        frame = ttk.Frame(self)
-        ttk.Label(frame, text="Add authorization data to", width=22).grid(row=0, column=0, sticky='w')
-        ttk.Combobox(frame, values=(
-            SIGNATURE_TYPE_AUTH_HEADER,
-            SIGNATURE_TYPE_QUERY,
-            SIGNATURE_TYPE_BODY,
-        ), textvariable=self.signature_type, state="readonly").grid(row=0, column=1)
-        ttk.Label(frame, text="Signature Method").grid(row=1, column=0, sticky='w', pady=3)
-        ttk.Combobox(frame, values=(
-            SIGNATURE_HMAC_SHA1,
-            SIGNATURE_HMAC_SHA256,
-            SIGNATURE_HMAC_SHA512,
-            SIGNATURE_RSA_SHA1,
-            SIGNATURE_RSA_SHA256,
-            SIGNATURE_RSA_SHA512,
-            SIGNATURE_PLAINTEXT,
-        ), textvariable=self.signature_method, state="readonly").grid(row=1, column=1)
-        frame.pack(fill="x")
+
+        self.canvas = tk.Canvas(self, borderwidth=0, highlightthickness=0)
+        self.scrollbar = ttk.Scrollbar(self, orient=tk.VERTICAL, command=self.canvas.yview)
+        self.canvas.configure(yscrollcommand=self.scrollbar.set)
+        self.scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        self.content_frame = ttk.Frame(self.canvas)
+        self.content_window = self.canvas.create_window((0, 0), window=self.content_frame, anchor="nw")
+        self.content_frame.bind("<Configure>", self._on_content_configure)
+        self.canvas.bind("<Configure>", self._on_canvas_configure)
+
+        frame = ttk.Frame(self.content_frame)
+        frame.columnconfigure(1, weight=1)
+        ttk.Label(frame, text="Add authorization data to", width=22).grid(
+            row=0, column=0, sticky="w"
+        )
+        ttk.Combobox(
+            frame,
+            values=(
+                SIGNATURE_TYPE_AUTH_HEADER,
+                SIGNATURE_TYPE_QUERY,
+                SIGNATURE_TYPE_BODY,
+            ),
+            textvariable=self.signature_type,
+            state="readonly",
+        ).grid(row=0, column=1, sticky="ew")
+        ttk.Label(frame, text="Signature Method").grid(row=1, column=0, sticky="w", pady=3)
+        ttk.Combobox(
+            frame,
+            values=(
+                SIGNATURE_HMAC_SHA1,
+                SIGNATURE_HMAC_SHA256,
+                SIGNATURE_HMAC_SHA512,
+                SIGNATURE_RSA_SHA1,
+                SIGNATURE_RSA_SHA256,
+                SIGNATURE_RSA_SHA512,
+                SIGNATURE_PLAINTEXT,
+            ),
+            textvariable=self.signature_method,
+            state="readonly",
+        ).grid(row=1, column=1, sticky="ew")
+        frame.pack(fill="x", padx=5, pady=5)
+        self._bind_scroll_events(frame)
+
+        self.page_container = ttk.Frame(self.content_frame)
+        self.page_container.pack(fill="both", expand=True, padx=5, pady=(0, 5))
         self.hmac_page()
+        self._bind_scroll_events(self.main_frame)
+        self.after_idle(self._refresh_scroll_region)
 
     def change_page(self, *args):
         if self.signature_method.get() in (
@@ -111,36 +141,79 @@ class OauthFrame(ttk.Frame):
         else:
             new_page = "rsa_page"
         if self.cpage != new_page:
-            self.main_frame.forget()
-            if new_page == "hmac_page":
-                self.hmac_page()
-            else:
-                self.rsa_page()
-            self.cpage = new_page
+            self._build_page(new_page)
+
+    def _on_content_configure(self, _event=None):
+        self._refresh_scroll_region()
+
+    def _on_canvas_configure(self, event):
+        self.canvas.itemconfigure(self.content_window, width=event.width)
+        self._refresh_scroll_region()
+
+    def _refresh_scroll_region(self):
+        self.update_idletasks()
+        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+
+    def _bind_scroll_events(self, widget):
+        if isinstance(widget, ScrolledText):
+            return
+        widget.bind("<MouseWheel>", self._on_mousewheel, add="+")
+        widget.bind("<Button-4>", self._on_mousewheel, add="+")
+        widget.bind("<Button-5>", self._on_mousewheel, add="+")
+        for child in widget.winfo_children():
+            self._bind_scroll_events(child)
+
+    def _on_mousewheel(self, event):
+        if event.num == 4:
+            self.canvas.yview_scroll(-1, "units")
+            return "break"
+        if event.num == 5:
+            self.canvas.yview_scroll(1, "units")
+            return "break"
+        if event.delta:
+            self.canvas.yview_scroll(int(-event.delta / 120), "units")
+            return "break"
+        return None
+
+    def _build_page(self, page_name):
+        if self.main_frame is not None:
+            self.main_frame.destroy()
+            self.main_frame = None
+            self.rsa_key_text = None
+        if page_name == "hmac_page":
+            self.hmac_page()
+        else:
+            self.rsa_page()
+        self.cpage = page_name
+        self.canvas.yview_moveto(0)
+        self._bind_scroll_events(self.main_frame)
+        self.after_idle(self._refresh_scroll_region)
 
     def hmac_page(self):
-        self.main_frame = ttk.Frame(self)
-        ttk.Label(self.main_frame, text="Consumer Key", width=22).grid(row=0, column=0, sticky='w')
-        ttk.Entry(self.main_frame, textvariable=self.client_key).grid(row=0, column=1)
-        ttk.Label(self.main_frame, text="Consumer Secret").grid(row=1, column=0, sticky='w', pady=3)
-        ttk.Entry(self.main_frame, textvariable=self.client_secret).grid(row=1, column=1)
-        ttk.Label(self.main_frame, text="Access Token").grid(row=2, column=0, sticky='w')
-        ttk.Entry(self.main_frame, textvariable=self.resource_owner_key).grid(row=2, column=1)
-        ttk.Label(self.main_frame, text="Token Secret").grid(row=3, column=0, sticky='w', pady=3)
-        ttk.Entry(self.main_frame, textvariable=self.resource_owner_secret).grid(row=3, column=1)
+        self.main_frame = ttk.Frame(self.page_container)
+        self.main_frame.columnconfigure(1, weight=1)
+        ttk.Label(self.main_frame, text="Consumer Key", width=22).grid(row=0, column=0, sticky="w")
+        ttk.Entry(self.main_frame, textvariable=self.client_key).grid(row=0, column=1, sticky="ew")
+        ttk.Label(self.main_frame, text="Consumer Secret").grid(row=1, column=0, sticky="w", pady=3)
+        ttk.Entry(self.main_frame, textvariable=self.client_secret).grid(row=1, column=1, sticky="ew")
+        ttk.Label(self.main_frame, text="Access Token").grid(row=2, column=0, sticky="w")
+        ttk.Entry(self.main_frame, textvariable=self.resource_owner_key).grid(row=2, column=1, sticky="ew")
+        ttk.Label(self.main_frame, text="Token Secret").grid(row=3, column=0, sticky="w", pady=3)
+        ttk.Entry(self.main_frame, textvariable=self.resource_owner_secret).grid(row=3, column=1, sticky="ew")
         self.main_frame.pack(fill="x")
 
     def rsa_page(self):
-        self.main_frame = ttk.Frame(self)
-        ttk.Label(self.main_frame, text="Consumer Key", width=22).grid(row=0, column=0, sticky='w')
-        ttk.Entry(self.main_frame, textvariable=self.client_key).grid(row=0, column=1, sticky="w")
-        ttk.Label(self.main_frame, text="Access Token").grid(row=1, column=0, sticky='w', pady=3)
-        ttk.Entry(self.main_frame, textvariable=self.resource_owner_key).grid(row=1, column=1, sticky="w")
-        ttk.Label(self.main_frame, text="Private key").grid(row=2, column=0, sticky='w')
+        self.main_frame = ttk.Frame(self.page_container)
+        self.main_frame.columnconfigure(1, weight=1)
+        ttk.Label(self.main_frame, text="Consumer Key", width=22).grid(row=0, column=0, sticky="w")
+        ttk.Entry(self.main_frame, textvariable=self.client_key).grid(row=0, column=1, sticky="ew")
+        ttk.Label(self.main_frame, text="Access Token").grid(row=1, column=0, sticky="w", pady=3)
+        ttk.Entry(self.main_frame, textvariable=self.resource_owner_key).grid(row=1, column=1, sticky="ew")
+        ttk.Label(self.main_frame, text="Private key").grid(row=2, column=0, sticky="w")
         ttk.Button(self.main_frame, text="Select File", command=self.on_open).grid(row=2, column=1, sticky="w")
-        self.rsa_key_text = ScrolledText(self.main_frame, width=40, height=5)
-        self.rsa_key_text.grid(row=3, column=1, sticky="w")
-        self.main_frame.pack(fill="x")
+        self.rsa_key_text = ScrolledText(self.main_frame, width=40, height=30)
+        self.rsa_key_text.grid(row=3, column=1, sticky="nsew")
+        self.main_frame.pack(fill="both", expand=True)
 
     def on_open(self):
         filepath = filedialog.askopenfilename(initialdir=os.path.expanduser("~"))
@@ -150,28 +223,28 @@ class OauthFrame(ttk.Frame):
                 self.rsa_key_text.insert(tk.END, f.read())
 
     def set(self, data: dict):
-        self.main_frame.forget()
-        if data.get("signature_method", SIGNATURE_HMAC_SHA1) in (
+        signature_method = data.get("signature_method", SIGNATURE_HMAC_SHA1)
+        if signature_method in (
             SIGNATURE_HMAC_SHA1,
             SIGNATURE_HMAC_SHA256,
             SIGNATURE_HMAC_SHA512,
             SIGNATURE_PLAINTEXT,
         ):
-            self.hmac_page()
+            self._build_page("hmac_page")
             self.client_key.set(data.get("client_key", ""))
             self.client_secret.set(data.get("client_secret", ""))
             self.resource_owner_key.set(data.get("resource_owner_key", ""))
             self.resource_owner_secret.set(data.get("resource_owner_secret", ""))
             self.signature_type.set(data.get("signature_type", SIGNATURE_TYPE_AUTH_HEADER))
-            self.signature_method.set(data.get("signature_method", SIGNATURE_HMAC_SHA1))
+            self.signature_method.set(signature_method)
         else:
-            self.rsa_page()
+            self._build_page("rsa_page")
             self.client_key.set(data.get("client_key", ""))
             self.resource_owner_key.set(data.get("resource_owner_key", ""))
             self.rsa_key_text.delete("1.0", "end")
             self.rsa_key_text.insert("1.0", data.get("rsa_key", ""))
             self.signature_type.set(data.get("signature_type", SIGNATURE_TYPE_AUTH_HEADER))
-            self.signature_method.set(data.get("signature_method", SIGNATURE_RSA_SHA1))
+            self.signature_method.set(signature_method)
 
     def get(self):
         if self.signature_method.get() in (
@@ -249,7 +322,7 @@ class AuthFrame(ttk.Frame):
         self.main_frame = ttk.Frame(self)
         self.oauth_frame = OauthFrame(self.main_frame)
         self.oauth_frame.pack(fill="both", expand=True)
-        self.main_frame.pack()
+        self.main_frame.pack(fill="both", expand=True)
 
     def get(self) -> dict:
         res = {"type": self.auth_type.get()}
@@ -450,11 +523,11 @@ class RequestWindow:
         notebook.add(self.body_box.root, text="Body")
 
         # pre-request script
-        self.script_box = ScrolledText(notebook)
+        self.script_box = CodeEditor(notebook)
         notebook.add(self.script_box, text="Pre-request Script")
 
         # tests
-        self.tests_box = ScrolledText(notebook)
+        self.tests_box = CodeEditor(notebook)
         notebook.add(self.tests_box, text="Post-response Script")
 
         # Create response area
