@@ -21,6 +21,214 @@ from .tools.draft_paper import DraftPaper
 from .dao.init import start_event as init_db, stop_event as close_db
 
 
+def _put_rect(image, color, x1, y1, x2, y2):
+    image.put(color, to=(x1, y1, x2, y2))
+
+
+def _put_scaled_rect(image, color, size, x1, y1, x2, y2, base=30):
+    scale = size / base
+    sx1 = max(0, min(size, round(x1 * scale)))
+    sy1 = max(0, min(size, round(y1 * scale)))
+    sx2 = max(0, min(size, round(x2 * scale)))
+    sy2 = max(0, min(size, round(y2 * scale)))
+    if sx2 > sx1 and sy2 > sy1:
+        _put_rect(image, color, sx1, sy1, sx2, sy2)
+
+
+def _create_folder_icon(size=30):
+    image = tk.PhotoImage(width=size, height=size)
+    _put_scaled_rect(image, "#d08a1d", size, 4, 11, 26, 24)
+    _put_scaled_rect(image, "#f0b64a", size, 4, 13, 26, 24)
+    _put_scaled_rect(image, "#ffd27a", size, 7, 8, 16, 13)
+    _put_scaled_rect(image, "#ffe0a8", size, 6, 14, 24, 22)
+    return image
+
+
+def _create_env_icon(size=30):
+    image = tk.PhotoImage(width=size, height=size)
+    _put_scaled_rect(image, "#8b96a3", size, 4, 8, 26, 10)
+    _put_scaled_rect(image, "#8b96a3", size, 4, 14, 26, 16)
+    _put_scaled_rect(image, "#8b96a3", size, 4, 20, 26, 22)
+    _put_scaled_rect(image, "#3f83f8", size, 8, 5, 13, 13)
+    _put_scaled_rect(image, "#f97316", size, 16, 11, 21, 19)
+    _put_scaled_rect(image, "#10b981", size, 11, 17, 16, 25)
+    return image
+
+
+def _create_history_icon(size=30):
+    image = tk.PhotoImage(width=size, height=size)
+    _put_scaled_rect(image, "#7ba8ff", size, 11, 4, 19, 6)
+    _put_scaled_rect(image, "#7ba8ff", size, 7, 6, 23, 8)
+    _put_scaled_rect(image, "#7ba8ff", size, 5, 8, 25, 10)
+    _put_scaled_rect(image, "#7ba8ff", size, 4, 10, 26, 20)
+    _put_scaled_rect(image, "#7ba8ff", size, 5, 20, 25, 22)
+    _put_scaled_rect(image, "#7ba8ff", size, 7, 22, 23, 24)
+    _put_scaled_rect(image, "#7ba8ff", size, 11, 24, 19, 26)
+    _put_scaled_rect(image, "#ffffff", size, 8, 10, 22, 20)
+    _put_scaled_rect(image, "#ffffff", size, 9, 8, 21, 22)
+    _put_scaled_rect(image, "#315ea8", size, 14, 10, 16, 16)
+    _put_scaled_rect(image, "#315ea8", size, 15, 14, 21, 16)
+    return image
+
+
+def _create_tool_icon(size=30):
+    image = tk.PhotoImage(width=size, height=size)
+    _put_scaled_rect(image, "#475569", size, 6, 8, 11, 24)
+    _put_scaled_rect(image, "#94a3b8", size, 9, 6, 15, 12)
+    _put_scaled_rect(image, "#94a3b8", size, 9, 20, 15, 26)
+    _put_scaled_rect(image, "#475569", size, 14, 10, 24, 20)
+    _put_scaled_rect(image, "#cbd5e1", size, 22, 8, 26, 12)
+    _put_scaled_rect(image, "#cbd5e1", size, 22, 18, 26, 22)
+    _put_scaled_rect(image, "#cbd5e1", size, 16, 6, 20, 10)
+    _put_scaled_rect(image, "#cbd5e1", size, 16, 20, 20, 24)
+    return image
+
+
+class CanvasSidebarTabs(ttk.Frame):
+    NAV_WIDTH = 44
+    BUTTON_SIZE = 28
+    BUTTON_GAP = 20
+    PADDING_Y = 12
+    NAV_BG = "#eef2f6"
+    ACTIVE_BG = "#ffffff"
+    INACTIVE_BG = "#dde5ec"
+    ACTIVE_FG = "#1f2933"
+    INACTIVE_FG = "#52606d"
+    BORDER_COLOR = "#c8d0d8"
+
+    def __init__(self, master):
+        super().__init__(master)
+        self.body = ttk.Frame(self)
+        self._tabs = []
+        self._current_index = None
+        self._regions = []
+
+        self.nav_canvas = tk.Canvas(
+            self,
+            width=self.NAV_WIDTH,
+            background=self.NAV_BG,
+            borderwidth=0,
+            highlightthickness=0,
+        )
+        self.nav_canvas.pack(side=tk.LEFT, fill=tk.Y)
+        ttk.Separator(self, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y)
+        self.body.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        self.nav_canvas.bind("<Configure>", self._on_configure)
+        self.nav_canvas.bind("<Button-1>", self._on_click)
+        self._redraw()
+
+    def add(self, child, text="", image=None):
+        self._tabs.append({"frame": child, "text": text, "image": image})
+        if self._current_index is None:
+            self.select(0)
+            return
+        self._redraw()
+
+    def select(self, tab_id=None):
+        if tab_id is None:
+            if self._current_index is None:
+                return ""
+            return self._tabs[self._current_index]["frame"]
+
+        index = self._resolve_index(tab_id)
+        if self._current_index == index:
+            self._redraw()
+            return self._tabs[index]["frame"]
+
+        if self._current_index is not None and self._tabs:
+            self._tabs[self._current_index]["frame"].pack_forget()
+
+        frame = self._tabs[index]["frame"]
+        frame.pack(fill=tk.BOTH, expand=True)
+        self._current_index = index
+        self._redraw()
+        return frame
+
+    def index(self, tab_id):
+        return self._resolve_index(tab_id)
+
+    def _resolve_index(self, tab_id):
+        if tab_id == "current":
+            if self._current_index is None:
+                raise tk.TclError("No current tab")
+            return self._current_index
+
+        if isinstance(tab_id, int):
+            if 0 <= tab_id < len(self._tabs):
+                return tab_id
+            raise tk.TclError("Tab index out of range")
+
+        for index, tab in enumerate(self._tabs):
+            if tab["frame"] is tab_id:
+                return index
+
+        raise tk.TclError("Tab not found")
+
+    def _redraw(self):
+        self.nav_canvas.delete("all")
+        self._regions.clear()
+        height = max(self.nav_canvas.winfo_height(), 1)
+        self.nav_canvas.create_rectangle(0, 0, self.NAV_WIDTH, height, fill=self.NAV_BG, outline=self.NAV_BG)
+
+        x1 = (self.NAV_WIDTH - self.BUTTON_SIZE) / 2
+        x2 = x1 + self.BUTTON_SIZE
+        y = self.PADDING_Y
+        for index, tab in enumerate(self._tabs):
+            y1 = y
+            y2 = y1 + self.BUTTON_SIZE
+            selected = index == self._current_index
+            fill = self.ACTIVE_BG if selected else self.INACTIVE_BG
+            self.nav_canvas.create_rectangle(x1, y1, x2, y2, fill=fill, outline=self.BORDER_COLOR, width=1)
+            if tab["image"] is not None:
+                self.nav_canvas.create_image((x1 + x2) / 2, (y1 + y2) / 2, image=tab["image"])
+            self._regions.append({"index": index, "rect": (x1, y1, x2, y2)})
+            y = y2 + self.BUTTON_GAP
+
+    def _inside(self, x, y, rect):
+        x1, y1, x2, y2 = rect
+        return x1 <= x <= x2 and y1 <= y <= y2
+
+    def _on_click(self, event):
+        for region in self._regions:
+            if self._inside(event.x, event.y, region["rect"]):
+                self.select(region["index"])
+                return
+
+    def _on_configure(self, _event):
+        self._redraw()
+
+
+class ToolListFrame(ttk.Frame):
+    def __init__(self, master, tools, open_tool):
+        super().__init__(master)
+        self._tools = tools
+        self._open_tool = open_tool
+
+        header = ttk.Frame(self)
+        ttk.Label(header, text="工具列表").pack(side=tk.LEFT)
+        ttk.Button(header, text="打开", command=self.open_selected).pack(side=tk.RIGHT)
+        header.pack(fill=tk.X, padx=8, pady=(8, 4))
+
+        self.tool_list = tk.Listbox(self, activestyle="none")
+        self.tool_list.pack(fill=tk.BOTH, expand=True, padx=8, pady=(0, 8))
+        self.tool_list.bind("<Double-Button-1>", self.open_selected)
+        self.tool_list.bind("<Return>", self.open_selected)
+
+        for item in tools:
+            self.tool_list.insert(tk.END, item["label"])
+
+        if tools:
+            self.tool_list.selection_set(0)
+
+    def open_selected(self, _event=None):
+        selection = self.tool_list.curselection()
+        if not selection:
+            return
+        tool = self._tools[selection[0]]
+        self._open_tool(tool["ui"], tool["text"])
+
+
 class CanvasNotebook(ttk.Frame):
     TAB_HEIGHT = 36
     TAB_GAP = 6
@@ -320,16 +528,40 @@ class MainWindow:
         self.root.title("HTTP Client")
         self.root.geometry("1280x720")
 
+        self.tool_entries = [
+            {"label": "AES", "ui": AesGui, "text": "AES"},
+            {"label": "Base64", "ui": Base64GUI, "text": "Base64"},
+            {"label": "DraftPaper", "ui": DraftPaper, "text": "DraftPaper"},
+            {"label": "MD5", "ui": MD5GUI, "text": "MD5"},
+            {"label": "Password", "ui": GenPwdWindow, "text": "Password"},
+            {"label": "Regular Expression", "ui": RegexWindow, "text": "Regular Expression "},
+            {"label": "Regular Expression Example", "ui": CommonlyUsed, "text": "Common Regular Expressions"},
+            {"label": "RSA Key", "ui": RSAKeyFrame, "text": "RSA Key"},
+            {"label": "RSA Public Key", "ui": RsaPublicKey, "text": "RSA Public Key"},
+            {"label": "RSA Check", "ui": RSACheck, "text": "RSA Check"},
+            {"label": "RSA Encrypt", "ui": RSAEncrypt, "text": "RSA Encrypt"},
+            {"label": "RSA Decrypt", "ui": RSADecrypt, "text": "RSA Decrypt"},
+            {"label": "Timestamp", "ui": TimestampWindow, "text": "Timestamp"},
+        ]
+
         panel_window = ttk.PanedWindow(self.root, orient="horizontal")
-        nba = ttk.Notebook(panel_window)
-        col_top = ttk.Frame(nba)
+        self.sidebar_icons = {
+            "col": _create_folder_icon(size=28),
+            "env": _create_env_icon(size=28),
+            "his": _create_history_icon(size=28),
+            "tool": _create_tool_icon(size=28),
+        }
+        nba = CanvasSidebarTabs(panel_window)
+        col_top = ttk.Frame(nba.body)
         self.col_win = CollectionWindow(col_top, **{"callback": self.collection})
-        nba.add(col_top, text="Col")
-        self.env_win = EnvironmentWindow(master=nba, callback=self.environment)
-        nba.add(self.env_win.root, text="Env")
-        history_top = ttk.Frame(nba)
+        nba.add(col_top, text="Col", image=self.sidebar_icons["col"])
+        self.env_win = EnvironmentWindow(master=nba.body, callback=self.environment)
+        nba.add(self.env_win.root, text="Env", image=self.sidebar_icons["env"])
+        history_top = ttk.Frame(nba.body)
         self.history_window = HistoryWindow(history_top, self.history)
-        nba.add(history_top, text="His")
+        nba.add(history_top, text="His", image=self.sidebar_icons["his"])
+        tool_top = ToolListFrame(nba.body, self.tool_entries, self.new_tab)
+        nba.add(tool_top, text="工具", image=self.sidebar_icons["tool"])
         panel_window.add(nba, weight=1)
         nbb = CanvasNotebook(panel_window, add_command=self.new_request, close_command=self.close_tab)
         self.nbb = nbb
@@ -344,21 +576,6 @@ class MainWindow:
         file_menu.add_command(label="Export", command=self.col_win.export_proj)
         file_menu.add_command(label="Exit", command=self.on_closing)
         menu.add_cascade(label="File", menu=file_menu)
-        tool_menu = tk.Menu(menu, tearoff=False)
-        tool_menu.add_command(label="AES", command=lambda: self.new_tab(AesGui, "AES"))
-        tool_menu.add_command(label="Base64", command=lambda: self.new_tab(Base64GUI, "Base64"))
-        tool_menu.add_command(label='DraftPaper', command=lambda: self.new_tab(DraftPaper, "DraftPaper"))
-        tool_menu.add_command(label="MD5", command=lambda: self.new_tab(MD5GUI, "MD5"))
-        tool_menu.add_command(label="Password", command=lambda: self.new_tab(GenPwdWindow, "Password"))
-        tool_menu.add_command(label="Regular Expression", command=lambda: self.new_tab(RegexWindow, "Regular Expression "))
-        tool_menu.add_command(label="Regular Expression Example", command=lambda: self.new_tab(CommonlyUsed, "Common Regular Expressions"))
-        tool_menu.add_command(label="RSA Key", command=lambda: self.new_tab(RSAKeyFrame, "RSA Key"))
-        tool_menu.add_command(label="RSA Public Key", command=lambda: self.new_tab(RsaPublicKey, "RSA Public Key"))
-        tool_menu.add_command(label="RSA Check", command=lambda: self.new_tab(RSACheck, "RSA Check"))
-        tool_menu.add_command(label="RSA Encrypt", command=lambda: self.new_tab(RSAEncrypt, "RSA Encrypt"))
-        tool_menu.add_command(label="RSA Decrypt", command=lambda: self.new_tab(RSADecrypt, "RSA Decrypt"))
-        tool_menu.add_command(label="Timestamp", command=lambda: self.new_tab(TimestampWindow, "Timestamp"))
-        menu.add_cascade(label="Tools", menu=tool_menu)
         help_menu = tk.Menu(menu, tearoff=False)
         help_menu.add_command(label="Help", command=lambda: self.new_tab(HelpWindow, "Help"))
         help_menu.add_command(label="About", command=lambda: self.new_tab(AboutWindow, "About"))
