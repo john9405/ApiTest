@@ -1,9 +1,14 @@
+import os
 import sqlite3
 import json
 
+from .. import WORK_DIR
+
+db_path = os.path.join(WORK_DIR, 'example.db')
+
 
 def list_collection(**kwargs):
-    con = sqlite3.connect('example.db')
+    con = sqlite3.connect(db_path)
     cur = con.cursor()
     cur.execute('SELECT id,name FROM folder where parent_id=0')
     data = [{'id': item[0], 'name': item[1]} for item in cur.fetchall()]
@@ -12,7 +17,7 @@ def list_collection(**kwargs):
 
 
 def create_collection(**kwargs):
-    con = sqlite3.connect('example.db')
+    con = sqlite3.connect(db_path)
     cur = con.cursor()
     cur.execute('INSERT INTO folder(name) VALUES (?)', (kwargs['name'],))
     inserted_id = cur.lastrowid
@@ -22,7 +27,7 @@ def create_collection(**kwargs):
 
 
 def delete_collection(**kwargs):
-    con = sqlite3.connect('example.db')
+    con = sqlite3.connect(db_path)
     cur = con.cursor()
     cur.execute('DELETE FROM folder where id=?', (kwargs['id'],))
     con.commit()
@@ -31,7 +36,7 @@ def delete_collection(**kwargs):
 
 
 def list_folder(**kwargs):
-    con = sqlite3.connect('example.db')
+    con = sqlite3.connect(db_path)
     cur = con.cursor()
     cur.execute('SELECT id,name FROM folder where parent_id=?', (kwargs['parent_id'],))
     data = [{'id': item[0], 'name': item[1]} for item in cur.fetchall()]
@@ -40,7 +45,7 @@ def list_folder(**kwargs):
 
 
 def create_folder(**kwargs):
-    con = sqlite3.connect('example.db')
+    con = sqlite3.connect(db_path)
     cur = con.cursor()
     cur.execute('INSERT INTO folder(name,parent_id,description,pre_script,post_script) VALUES (?,?,?,?,?)', (
         kwargs.get('name','New Folder'),
@@ -56,7 +61,7 @@ def create_folder(**kwargs):
 
 
 def retrieve_folder(**kwargs):
-    con = sqlite3.connect('example.db')
+    con = sqlite3.connect(db_path)
     cur = con.cursor()
     cur.execute('SELECT id,name,description,pre_script,post_script,parent_id FROM folder where id=?', (kwargs['id'],))
     bean = cur.fetchone()
@@ -70,7 +75,7 @@ def retrieve_folder(**kwargs):
 
 
 def update_folder(**kwargs):
-    con = sqlite3.connect('example.db')
+    con = sqlite3.connect(db_path)
     cur = con.cursor()
     keys = list(sorted(kwargs.keys()))
     var = ','.join([f'{key}=?' for key in keys if key != 'id'])
@@ -84,7 +89,7 @@ def update_folder(**kwargs):
 
 
 def delete_folder(**kwargs):
-    con = sqlite3.connect('example.db')
+    con = sqlite3.connect(db_path)
     cur = con.cursor()
     cur.execute('DELETE FROM folder where id=?', (kwargs['id'],))
     con.commit()
@@ -93,7 +98,7 @@ def delete_folder(**kwargs):
 
 
 def list_request(**kwargs):
-    con = sqlite3.connect('example.db')
+    con = sqlite3.connect(db_path)
     cur = con.cursor()
     cur.execute('SELECT id,name,method FROM request where folder_id=?', (kwargs['folder_id'],))
     items = cur.fetchall()
@@ -102,7 +107,7 @@ def list_request(**kwargs):
 
 
 def create_request(**kwargs):
-    con = sqlite3.connect('example.db')
+    con = sqlite3.connect(db_path)
     cur = con.cursor()
     cur.execute(
         'INSERT INTO request(name,method,url,params,headers,body,auth,pre_script,post_script,folder_id) VALUES (?,?,?,?,?,?,?,?,?,?)',
@@ -123,7 +128,7 @@ def create_request(**kwargs):
 
 
 def retrieve_request(**kwargs):
-    con = sqlite3.connect('example.db')
+    con = sqlite3.connect(db_path)
     cur = con.cursor()
     cur.execute('SELECT id,name,pre_script,post_script,params,headers,body,auth,method,url FROM request where id=?', (kwargs['id'],))
     data = cur.fetchone()
@@ -141,7 +146,7 @@ def retrieve_request(**kwargs):
 
 
 def update_request(**kwargs):
-    con = sqlite3.connect('example.db')
+    con = sqlite3.connect(db_path)
     cur = con.cursor()
     keys = list(sorted(kwargs.keys()))
     var = ','.join([f'{key}=?' for key in keys if key != 'id'])
@@ -155,7 +160,7 @@ def update_request(**kwargs):
 
 
 def delete_request(**kwargs):
-    con = sqlite3.connect('example.db')
+    con = sqlite3.connect(db_path)
     cur = con.cursor()
     cur.execute('DELETE FROM request where id=?', (kwargs['id'],))
     con.commit()
@@ -164,7 +169,7 @@ def delete_request(**kwargs):
 
 
 def list_album(**kwargs):
-    con = sqlite3.connect('example.db')
+    con = sqlite3.connect(db_path)
     cur = con.cursor()
     cur.execute('SELECT id,name,is_active FROM album')
     items = cur.fetchall()
@@ -173,7 +178,7 @@ def list_album(**kwargs):
 
 
 def create_album(**kwargs):
-    con = sqlite3.connect('example.db')
+    con = sqlite3.connect(db_path)
     cur = con.cursor()
     cur.execute('INSERT INTO album(name) VALUES (?)', (kwargs['name'],))
     inserted_id = cur.lastrowid
@@ -183,7 +188,7 @@ def create_album(**kwargs):
 
 
 def update_album(*args, **kwargs):
-    con = sqlite3.connect('example.db')
+    con = sqlite3.connect(db_path)
     cur = con.cursor()
     cur.execute('UPDATE album SET name=?,modified_at=current_date WHERE id=?', (kwargs['name'], kwargs['id'],))
     con.commit()
@@ -192,7 +197,7 @@ def update_album(*args, **kwargs):
 
 
 def active_album(*args, **kwargs):
-    con = sqlite3.connect('example.db')
+    con = sqlite3.connect(db_path)
     cur = con.cursor()
     cur.execute("update album set is_active=0 where name!='Globals' and is_active=1")
     cur.execute("update album set is_active=1 where id=?", (kwargs['id'],))
@@ -202,7 +207,7 @@ def active_album(*args, **kwargs):
 
 
 def delete_album(**kwargs):
-    con = sqlite3.connect('example.db')
+    con = sqlite3.connect(db_path)
     cur = con.cursor()
     cur.execute("DELETE FROM variable where belong_name='album' and belong_id=?", (kwargs['id'],))
     cur.execute('DELETE FROM album where id=?', (kwargs['id'],))
@@ -212,7 +217,7 @@ def delete_album(**kwargs):
 
 
 def list_variable(**kwargs):
-    con = sqlite3.connect('example.db')
+    con = sqlite3.connect(db_path)
     cur = con.cursor()
     cur.execute('SELECT id,name,content FROM variable where belong_name=? and belong_id=?',
                 (kwargs['belong_name'], kwargs['belong_id']))
@@ -222,7 +227,7 @@ def list_variable(**kwargs):
 
 
 def retrieve_global_variable(**kwargs):
-    con = sqlite3.connect('example.db')
+    con = sqlite3.connect(db_path)
     cur = con.cursor()
     cur.execute("select id,name from album where name='Globals'")
     album = cur.fetchone()
@@ -242,7 +247,7 @@ def retrieve_global_variable(**kwargs):
 
 
 def retrieve_active_variable(**kwargs):
-    con = sqlite3.connect('example.db')
+    con = sqlite3.connect(db_path)
     cur = con.cursor()
 
     cur.execute("select id,name from album where name!='Globals' and is_active=1")
@@ -271,7 +276,7 @@ def retrieve_active_variable(**kwargs):
 
 
 def retrieve_folder_variable(**kwargs):
-    con = sqlite3.connect('example.db')
+    con = sqlite3.connect(db_path)
     cur = con.cursor()
     cur.execute('SELECT id,name,content FROM variable where belong_name=? and belong_id=? and name=?',
                 ('folder', kwargs['folder_id'], kwargs['name']))
@@ -285,7 +290,7 @@ def retrieve_folder_variable(**kwargs):
 
 
 def create_variable(**kwargs):
-    con = sqlite3.connect('example.db')
+    con = sqlite3.connect(db_path)
     cur = con.cursor()
     cur.execute('INSERT INTO variable(name,content,belong_name,belong_id) values (?,?,?,?)',
                 (kwargs['name'], kwargs['content'], kwargs['belong_name'], kwargs['belong_id']))
@@ -296,7 +301,7 @@ def create_variable(**kwargs):
 
 
 def update_variable(**kwargs):
-    con = sqlite3.connect('example.db')
+    con = sqlite3.connect(db_path)
     cur = con.cursor()
     cur.execute('UPDATE variable SET name=?,content=?,modified_at=current_date WHERE id=?',
                 (kwargs['name'], kwargs['content'], kwargs['id']))
@@ -306,7 +311,7 @@ def update_variable(**kwargs):
 
 
 def delete_variable(**kwargs):
-    con = sqlite3.connect('example.db')
+    con = sqlite3.connect(db_path)
     cur = con.cursor()
     cur.execute('DELETE FROM variable where id=?', (kwargs['id'],))
     con.commit()
@@ -315,7 +320,7 @@ def delete_variable(**kwargs):
 
 
 def list_history(**kwargs):
-    con = sqlite3.connect('example.db')
+    con = sqlite3.connect(db_path)
     cur = con.cursor()
     cur.execute('SELECT id,method,url FROM history')
     items = cur.fetchall()
@@ -325,7 +330,7 @@ def list_history(**kwargs):
 
 
 def create_history(**kwargs):
-    con = sqlite3.connect('example.db')
+    con = sqlite3.connect(db_path)
     cur = con.cursor()
     cur.execute(
         'INSERT INTO history(method,url,params,headers,body,auth,pre_script,post_script,res_body,res_headers,res_cookies) values (?,?,?,?,?,?,?,?,?,?,?)',
@@ -347,7 +352,7 @@ def create_history(**kwargs):
 
 
 def retrieve_history(**kwargs):
-    con = sqlite3.connect('example.db')
+    con = sqlite3.connect(db_path)
     cur = con.cursor()
     cur.execute(
         'select id,method,url,params,headers,body,auth, pre_script,post_script,res_body,res_headers,res_cookies from history where id=?',
@@ -372,7 +377,7 @@ def retrieve_history(**kwargs):
 
 
 def delete_history(**kwargs):
-    con = sqlite3.connect('example.db')
+    con = sqlite3.connect(db_path)
     cur = con.cursor()
     cur.execute('DELETE FROM history where id=?', (kwargs['id'],))
     con.commit()
@@ -381,7 +386,7 @@ def delete_history(**kwargs):
 
 
 def delete_all_history(**kwargs):
-    con = sqlite3.connect('example.db')
+    con = sqlite3.connect(db_path)
     cur = con.cursor()
     cur.execute('DELETE FROM history where id>0')
     con.commit()

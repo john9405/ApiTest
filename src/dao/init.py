@@ -1,7 +1,12 @@
+import os
 import sqlite3
 
+from .. import WORK_DIR
+
+
 def start_event():
-    con = sqlite3.connect('example.db')
+    db_path = os.path.join(WORK_DIR, 'example.db')
+    con = sqlite3.connect(db_path)
     cur = con.cursor()
 
     # 初始化数据库
