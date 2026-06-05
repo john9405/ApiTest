@@ -93,8 +93,21 @@ class TimestampWindow:
         ttk.Label(self.root, text="Now:").grid(row=3, column=0, sticky='w')
         timestamp_entry = ttk.Entry(self.root)
         timestamp_entry.grid(row=3, column=1)
+        ttk.Button(
+            self.root, text="Copy", width=5,
+            command=lambda: self._copy_to_clipboard(timestamp_entry)
+        ).grid(row=3, column=2)
         ttk.Label(self.root, text="Date:").grid(row=4, column=0, sticky='w')
         datetime_entry = ttk.Entry(self.root)
         datetime_entry.grid(row=4, column=1, pady=3)
+        ttk.Button(
+            self.root, text="Copy", width=5,
+            command=lambda: self._copy_to_clipboard(datetime_entry)
+        ).grid(row=4, column=2)
         thread = threading.Thread(target=update_now, args=(timestamp_entry, datetime_entry,))
         thread.start()
+
+    def _copy_to_clipboard(self, entry):
+        """复制 Entry 中的内容到剪贴板"""
+        self.root.clipboard_clear()
+        self.root.clipboard_append(entry.get())
