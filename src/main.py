@@ -71,18 +71,6 @@ def _create_history_icon(size=30):
     return image
 
 
-def _create_tool_icon(size=30):
-    image = tk.PhotoImage(width=size, height=size)
-    _put_scaled_rect(image, "#475569", size, 6, 8, 11, 24)
-    _put_scaled_rect(image, "#94a3b8", size, 9, 6, 15, 12)
-    _put_scaled_rect(image, "#94a3b8", size, 9, 20, 15, 26)
-    _put_scaled_rect(image, "#475569", size, 14, 10, 24, 20)
-    _put_scaled_rect(image, "#cbd5e1", size, 22, 8, 26, 12)
-    _put_scaled_rect(image, "#cbd5e1", size, 22, 18, 26, 22)
-    _put_scaled_rect(image, "#cbd5e1", size, 16, 6, 20, 10)
-    _put_scaled_rect(image, "#cbd5e1", size, 16, 20, 20, 24)
-    return image
-
 
 class CanvasSidebarTabs:
     NAV_WIDTH = 44
@@ -196,34 +184,6 @@ class CanvasSidebarTabs:
         self._redraw()
 
 
-class ToolListFrame(ttk.Frame):
-    def __init__(self, master, tools, open_tool):
-        super().__init__(master)
-        self._tools = tools
-        self._open_tool = open_tool
-
-        header = ttk.Frame(self)
-        ttk.Label(header, text="工具列表").pack(side=tk.LEFT)
-        ttk.Button(header, text="打开", command=self.open_selected).pack(side=tk.RIGHT)
-        header.pack(fill=tk.X, padx=8, pady=(8, 4))
-
-        self.tool_list = tk.Listbox(self, activestyle="none")
-        self.tool_list.pack(fill=tk.BOTH, expand=True, padx=8, pady=(0, 8))
-        self.tool_list.bind("<Double-Button-1>", self.open_selected)
-        self.tool_list.bind("<Return>", self.open_selected)
-
-        for item in tools:
-            self.tool_list.insert(tk.END, item["label"])
-
-        if tools:
-            self.tool_list.selection_set(0)
-
-    def open_selected(self, _event=None):
-        selection = self.tool_list.curselection()
-        if not selection:
-            return
-        tool = self._tools[selection[0]]
-        self._open_tool(tool["ui"], tool["text"])
 
 
 class CanvasNotebook(ttk.Frame):
@@ -541,36 +501,55 @@ class MainWindow:
             {"label": "Timestamp", "ui": TimestampWindow, "text": "Timestamp"},
         ]
 
+        # Status bar at bottom — must be packed BEFORE main_frame so it
+        # reserves space first; otherwise main_frame can push it off-screen
+        # when internal layout changes (e.g. adding a new tab).
+        status_bar = ttk.Frame(self.root)
+        status_bar.pack(side=tk.BOTTOM, fill=tk.X)
+
+        tools_mb = tk.Menubutton(status_bar, text="tools", relief=tk.RAISED)
+        tools_mb.pack(side=tk.LEFT)
+
+        tools_menu = tk.Menu(tools_mb, tearoff=False)
+        for entry in self.tool_entries:
+            tools_menu.add_command(
+                label=entry["label"],
+                command=lambda ui=entry["ui"], text=entry["text"]: self.new_tab(ui, text)
+            )
+        tools_mb.config(menu=tools_menu)
+
         main_frame = ttk.Frame(self.root)
         main_frame.pack(fill=tk.BOTH, expand=True)
-        sidebar_frame = ttk.Frame(main_frame)
-        sidebar_frame.pack(side=tk.LEFT, fill=tk.Y)
-        ttk.Separator(main_frame, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y)
         content_frame = ttk.Frame(main_frame)
-        content_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        content_frame.pack(fill=tk.BOTH, expand=True)
 
         panel_window = ttk.PanedWindow(content_frame, orient="horizontal")
-        self.sidebar_icons = {
-            "col": _create_folder_icon(size=28),
-            "env": _create_env_icon(size=28),
-            "his": _create_history_icon(size=28),
-            "tool": _create_tool_icon(size=28),
-        }
-        nba = CanvasSidebarTabs(sidebar_frame, panel_window)
-        col_top = ttk.Frame(nba.body)
+
+        sidebar_frame = ttk.Frame(panel_window)
+        nba = ttk.PanedWindow(sidebar_frame, orient=tk.VERTICAL)
+        nba.pack(fill=tk.BOTH, expand=True)
+        col_top = ttk.Frame(nba)
         self.col_win = CollectionWindow(col_top, **{"callback": self.collection})
-        nba.add(col_top, text="Col", image=self.sidebar_icons["col"])
-        self.env_win = EnvironmentWindow(master=nba.body, callback=self.environment)
-        nba.add(self.env_win.root, text="Env", image=self.sidebar_icons["env"])
-        history_top = ttk.Frame(nba.body)
-        self.history_window = HistoryWindow(history_top, self.history)
-        nba.add(history_top, text="His", image=self.sidebar_icons["his"])
-        tool_top = ToolListFrame(nba.body, self.tool_entries, self.new_tab)
-        nba.add(tool_top, text="工具", image=self.sidebar_icons["tool"])
-        panel_window.add(nba.body, weight=1)
+        nba.add(col_top, weight=1)
+        panel_window.add(sidebar_frame, weight=2)
+
         nbb = CanvasNotebook(panel_window, add_command=self.new_request, close_command=self.close_tab)
         self.nbb = nbb
         panel_window.add(nbb, weight=10)
+
+        # Right sidebar
+        right_side_bar = ttk.Frame(panel_window)
+        rsbpw = ttk.PanedWindow(right_side_bar, orient=tk.VERTICAL)
+        rsbpw.pack(fill=tk.BOTH, expand=True)
+
+        self.env_win = EnvironmentWindow(master=rsbpw, callback=self.environment)
+        rsbpw.add(self.env_win.root, weight=1)
+
+        history_top = ttk.Frame(rsbpw)
+        self.history_window = HistoryWindow(history_top, self.history)
+        rsbpw.add(history_top, weight=1)
+
+        panel_window.add(right_side_bar, weight=2)
         panel_window.pack(fill='both', expand=True)
 
         menu = tk.Menu(self.root)
