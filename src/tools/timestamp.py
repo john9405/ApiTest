@@ -14,7 +14,7 @@ def update_now(var, var2):
             var2.delete(0, tk.END)
             var2.insert(0, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
             time.sleep(1)
-        except RuntimeError:
+        except (RuntimeError, tk.TclError):
             return
 
 
