@@ -73,6 +73,52 @@ create_at DATETIME DEFAULT CURRENT_DATE,
 modified_at DATETIME DEFAULT CURRENT_DATE
 )''')
 
+    cur.execute('''CREATE TABLE IF NOT EXISTS flow (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	name TEXT NOT NULL,
+	description TEXT DEFAULT '',
+	create_at DATETIME DEFAULT CURRENT_DATE,
+	modified_at DATETIME DEFAULT CURRENT_DATE
+	)''')
+
+    cur.execute('''CREATE TABLE IF NOT EXISTS flow_node (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	flow_id INTEGER NOT NULL,
+	node_type TEXT NOT NULL,
+	label TEXT DEFAULT '',
+	x REAL DEFAULT 100.0,
+	y REAL DEFAULT 100.0,
+	width REAL DEFAULT 160.0,
+	height REAL DEFAULT 80.0,
+	config TEXT DEFAULT '{}',
+	create_at DATETIME DEFAULT CURRENT_DATE,
+	modified_at DATETIME DEFAULT CURRENT_DATE,
+	FOREIGN KEY (flow_id) REFERENCES flow(id) ON DELETE CASCADE
+	)''')
+
+    cur.execute('''CREATE TABLE IF NOT EXISTS flow_connection (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	flow_id INTEGER NOT NULL,
+	source_node_id INTEGER NOT NULL,
+	source_port TEXT DEFAULT 'output',
+	target_node_id INTEGER NOT NULL,
+	target_port TEXT DEFAULT 'input',
+	create_at DATETIME DEFAULT CURRENT_DATE,
+	FOREIGN KEY (flow_id) REFERENCES flow(id) ON DELETE CASCADE,
+	FOREIGN KEY (source_node_id) REFERENCES flow_node(id) ON DELETE CASCADE,
+	FOREIGN KEY (target_node_id) REFERENCES flow_node(id) ON DELETE CASCADE
+	)''')
+
+    cur.execute('''CREATE TABLE IF NOT EXISTS flow_execution (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	flow_id INTEGER NOT NULL,
+	status TEXT DEFAULT 'pending',
+	result TEXT DEFAULT '{}',
+	started_at DATETIME DEFAULT CURRENT_DATE,
+	finished_at DATETIME,
+	FOREIGN KEY (flow_id) REFERENCES flow(id) ON DELETE CASCADE
+	)''')
+
     cur.execute("select * from album where name='Globals'")
     if len(cur.fetchall()) == 0:
         cur.execute("INSERT INTO album (name,is_active) VALUES ('Globals',0)")

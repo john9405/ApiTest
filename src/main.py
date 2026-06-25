@@ -8,6 +8,7 @@ from .his import HistoryWindow
 from .req import RequestWindow
 from .col import CollectionWindow, ProjectWindow, FolderWindow
 from .env import EnvironmentWindow, VariableWindow
+from .flow import FlowWindow, FlowEditor
 from .help import HelpWindow
 from .about import AboutWindow
 from .tools.aes import AesGui
@@ -531,6 +532,8 @@ class MainWindow:
         col_top = ttk.Frame(nba)
         self.col_win = CollectionWindow(col_top, **{"callback": self.collection})
         nba.add(col_top, weight=1)
+        self.flow_win = FlowWindow(nba, callback=self.flow_callback)
+        nba.add(self.flow_win.root, weight=1)
         panel_window.add(sidebar_frame, weight=2)
 
         nbb = CanvasNotebook(panel_window, add_command=self.new_request, close_command=self.close_tab)
@@ -596,14 +599,17 @@ class MainWindow:
         t1 = threading.Thread(target=self.col_win.on_start)
         t2 = threading.Thread(target=self.env_win.on_start)
         t3 = threading.Thread(target=self.history_window.on_start)
+        t4 = threading.Thread(target=self.flow_win.on_start)
         t1.start()
         t2.start()
         t3.start()
+        t4.start()
 
     def write_to_disk(self):
         self.col_win.on_close()
         self.env_win.on_end()
         self.history_window.on_end()
+        self.flow_win.on_end()
 
     def on_closing(self):
         close_db()
@@ -684,6 +690,36 @@ class MainWindow:
         self.nbb.add(frame, text=kwargs.get("collection", "Var"))
         self.nbb.select(frame)
 
+    def flow_callback(self, **kwargs):
+        """Handle flow panel events."""
+        action = kwargs.get("action")
+        if action == "open_flow":
+            flow_id = kwargs.get("flow_id")
+            tag = f"flow_{flow_id}"
+            if tag in self.tag_list:
+                self.nbb.select(self.tag_list.index(tag))
+                return
+            frame = ttk.Frame(self.nbb.body)
+            editor = FlowEditor(
+                master=frame,
+                flow_id=flow_id,
+                on_save=lambda: self.flow_win.refresh(),
+            )
+            self.tag_list.append(tag)
+            self.nbb.add(frame, text=editor.get_title())
+            self.nbb.select(frame)
+            # Bind title updates
+            editor.set_title_callback(lambda title: self._update_flow_tab_title(tag, title))
+
+    def _update_flow_tab_title(self, tag, title):
+        """Update the notebook tab title for a flow editor."""
+        if tag in self.tag_list:
+            try:
+                index = self.tag_list.index(tag)
+                self.nbb.tab(index, text=title)
+            except tk.TclError:
+                pass
+
     def previous_tab(self):
         try:
             # 获取当前选中的选项卡的索引
@@ -716,6 +752,14 @@ class MainWindow:
     def close_tab(self, index=None):
         try:
             current_index = self.nbb.index('current') if index is None else index
+            tag = self.tag_list[current_index]
+            # Check if it's a flow editor tab — prompt to save unsaved changes
+            if tag.startswith("flow_"):
+                frame = self.nbb.select(current_index)
+                if frame and hasattr(frame, 'flow_editor') and frame.flow_editor.is_dirty:
+                    from tkinter import messagebox
+                    if messagebox.askyesno("Unsaved Changes", "Save changes before closing?"):
+                        frame.flow_editor.save()
             self.tag_list.pop(current_index)
             self.nbb.forget(current_index)
         except (IndexError, tk.TclError):

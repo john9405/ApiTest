@@ -106,6 +106,38 @@ def list_request(**kwargs):
     return [{'id': item[0], 'name': item[1], 'method': item[2]} for item in items]
 
 
+def list_all_requests(**kwargs):
+    """Return all requests with their folder paths.
+
+    Returns: [{'id': int, 'name': str, 'method': str, 'path': str}, ...]
+    Path is built from folder names up to the root (e.g. 'Project / SubFolder').
+    """
+    con = sqlite3.connect(db_path)
+    cur = con.cursor()
+
+    # Get all folders and build parent lookup
+    folders = {}
+    cur.execute('SELECT id, name, parent_id FROM folder')
+    for row in cur.fetchall():
+        folders[row[0]] = {'name': row[1], 'parent_id': row[2]}
+
+    def _build_path(folder_id):
+        parts = []
+        fid = folder_id
+        while fid and fid in folders:
+            parts.insert(0, folders[fid]['name'])
+            fid = folders[fid]['parent_id']
+        return ' / '.join(parts) if parts else ''
+
+    # Get all requests
+    cur.execute('SELECT id, name, method, folder_id FROM request ORDER BY name')
+    items = cur.fetchall()
+    con.close()
+
+    return [{'id': item[0], 'name': item[1], 'method': item[2],
+             'path': _build_path(item[3])} for item in items]
+
+
 def create_request(**kwargs):
     con = sqlite3.connect(db_path)
     cur = con.cursor()
@@ -392,3 +424,231 @@ def delete_all_history(**kwargs):
     con.commit()
     con.close()
     return True
+
+
+# -- Flow --
+def create_flow(**kwargs):
+    con = sqlite3.connect(db_path)
+    cur = con.cursor()
+    cur.execute('INSERT INTO flow(name,description) VALUES (?,?)',
+                (kwargs.get('name', 'New Flow'), kwargs.get('description', '')))
+    inserted_id = cur.lastrowid
+    con.commit()
+    con.close()
+    return inserted_id
+
+
+def retrieve_flow(**kwargs):
+    con = sqlite3.connect(db_path)
+    cur = con.cursor()
+    cur.execute('SELECT id,name,description,create_at,modified_at FROM flow WHERE id=?', (kwargs['id'],))
+    bean = cur.fetchone()
+    con.close()
+    if bean is None:
+        return None
+    return {'id': bean[0], 'name': bean[1], 'description': bean[2],
+            'create_at': bean[3], 'modified_at': bean[4]}
+
+
+def update_flow(**kwargs):
+    con = sqlite3.connect(db_path)
+    cur = con.cursor()
+    keys = list(sorted(kwargs.keys()))
+    var = ','.join([f'{key}=?' for key in keys if key != 'id'])
+    sqlstr = f'UPDATE flow SET {var},modified_at=current_date WHERE id=?'
+    values = [kwargs[key] for key in keys if key != 'id']
+    values.append(kwargs['id'])
+    cur.execute(sqlstr, values)
+    con.commit()
+    con.close()
+    return True
+
+
+def delete_flow(**kwargs):
+    con = sqlite3.connect(db_path)
+    cur = con.cursor()
+    cur.execute('DELETE FROM flow_node WHERE flow_id=?', (kwargs['id'],))
+    cur.execute('DELETE FROM flow_connection WHERE flow_id=?', (kwargs['id'],))
+    cur.execute('DELETE FROM flow_execution WHERE flow_id=?', (kwargs['id'],))
+    cur.execute('DELETE FROM flow WHERE id=?', (kwargs['id'],))
+    con.commit()
+    con.close()
+    return True
+
+
+def list_flow(**kwargs):
+    con = sqlite3.connect(db_path)
+    cur = con.cursor()
+    cur.execute('SELECT id,name,description,modified_at FROM flow ORDER BY modified_at DESC')
+    items = cur.fetchall()
+    con.close()
+    return [{'id': item[0], 'name': item[1], 'description': item[2], 'modified_at': item[3]} for item in items]
+
+
+# -- Flow Node --
+def create_flow_node(**kwargs):
+    con = sqlite3.connect(db_path)
+    cur = con.cursor()
+    cur.execute(
+        'INSERT INTO flow_node(flow_id,node_type,label,x,y,width,height,config) VALUES (?,?,?,?,?,?,?,?)',
+        (kwargs['flow_id'], kwargs.get('node_type', 'log'),
+         kwargs.get('label', ''), kwargs.get('x', 100.0), kwargs.get('y', 100.0),
+         kwargs.get('width', 160.0), kwargs.get('height', 80.0),
+         json.dumps(kwargs.get('config', {}))))
+    inserted_id = cur.lastrowid
+    con.commit()
+    con.close()
+    return inserted_id
+
+
+def retrieve_flow_node(**kwargs):
+    con = sqlite3.connect(db_path)
+    cur = con.cursor()
+    cur.execute('SELECT id,flow_id,node_type,label,x,y,width,height,config FROM flow_node WHERE id=?',
+                (kwargs['id'],))
+    bean = cur.fetchone()
+    con.close()
+    if bean is None:
+        return None
+    return {'id': bean[0], 'flow_id': bean[1], 'node_type': bean[2], 'label': bean[3],
+            'x': bean[4], 'y': bean[5], 'width': bean[6], 'height': bean[7],
+            'config': json.loads(bean[8])}
+
+
+def update_flow_node(**kwargs):
+    con = sqlite3.connect(db_path)
+    cur = con.cursor()
+    keys = list(sorted(kwargs.keys()))
+    var = ','.join([f'{key}=?' for key in keys if key != 'id'])
+    sqlstr = f'UPDATE flow_node SET {var},modified_at=current_date WHERE id=?'
+    values = [kwargs[key] for key in keys if key != 'id']
+    values.append(kwargs['id'])
+    cur.execute(sqlstr, values)
+    con.commit()
+    con.close()
+    return True
+
+
+def delete_flow_node(**kwargs):
+    con = sqlite3.connect(db_path)
+    cur = con.cursor()
+    cur.execute('DELETE FROM flow_connection WHERE source_node_id=? OR target_node_id=?',
+                (kwargs['id'], kwargs['id']))
+    cur.execute('DELETE FROM flow_node WHERE id=?', (kwargs['id'],))
+    con.commit()
+    con.close()
+    return True
+
+
+def list_flow_node(**kwargs):
+    con = sqlite3.connect(db_path)
+    cur = con.cursor()
+    cur.execute('SELECT id,flow_id,node_type,label,x,y,width,height,config FROM flow_node WHERE flow_id=?',
+                (kwargs['flow_id'],))
+    items = cur.fetchall()
+    con.close()
+    return [{'id': item[0], 'flow_id': item[1], 'node_type': item[2], 'label': item[3],
+             'x': item[4], 'y': item[5], 'width': item[6], 'height': item[7],
+             'config': json.loads(item[8])} for item in items]
+
+
+def delete_flow_node_by_flow(**kwargs):
+    con = sqlite3.connect(db_path)
+    cur = con.cursor()
+    cur.execute('DELETE FROM flow_node WHERE flow_id=?', (kwargs['flow_id'],))
+    con.commit()
+    con.close()
+    return True
+
+
+# -- Flow Connection --
+def create_flow_connection(**kwargs):
+    con = sqlite3.connect(db_path)
+    cur = con.cursor()
+    cur.execute(
+        'INSERT INTO flow_connection(flow_id,source_node_id,source_port,target_node_id,target_port) VALUES (?,?,?,?,?)',
+        (kwargs['flow_id'], kwargs['source_node_id'], kwargs.get('source_port', 'output'),
+         kwargs['target_node_id'], kwargs.get('target_port', 'input')))
+    inserted_id = cur.lastrowid
+    con.commit()
+    con.close()
+    return inserted_id
+
+
+def retrieve_flow_connection(**kwargs):
+    con = sqlite3.connect(db_path)
+    cur = con.cursor()
+    cur.execute('SELECT id,flow_id,source_node_id,source_port,target_node_id,target_port FROM flow_connection WHERE id=?',
+                (kwargs['id'],))
+    bean = cur.fetchone()
+    con.close()
+    if bean is None:
+        return None
+    return {'id': bean[0], 'flow_id': bean[1], 'source_node_id': bean[2],
+            'source_port': bean[3], 'target_node_id': bean[4], 'target_port': bean[5]}
+
+
+def delete_flow_connection(**kwargs):
+    con = sqlite3.connect(db_path)
+    cur = con.cursor()
+    cur.execute('DELETE FROM flow_connection WHERE id=?', (kwargs['id'],))
+    con.commit()
+    con.close()
+    return True
+
+
+def list_flow_connection(**kwargs):
+    con = sqlite3.connect(db_path)
+    cur = con.cursor()
+    cur.execute('SELECT id,flow_id,source_node_id,source_port,target_node_id,target_port FROM flow_connection WHERE flow_id=?',
+                (kwargs['flow_id'],))
+    items = cur.fetchall()
+    con.close()
+    return [{'id': item[0], 'flow_id': item[1], 'source_node_id': item[2],
+             'source_port': item[3], 'target_node_id': item[4], 'target_port': item[5]} for item in items]
+
+
+def delete_flow_connection_by_flow(**kwargs):
+    con = sqlite3.connect(db_path)
+    cur = con.cursor()
+    cur.execute('DELETE FROM flow_connection WHERE flow_id=?', (kwargs['flow_id'],))
+    con.commit()
+    con.close()
+    return True
+
+
+# -- Flow Execution --
+def create_flow_execution(**kwargs):
+    con = sqlite3.connect(db_path)
+    cur = con.cursor()
+    cur.execute('INSERT INTO flow_execution(flow_id,status,result) VALUES (?,?,?)',
+                (kwargs['flow_id'], kwargs.get('status', 'pending'), json.dumps(kwargs.get('result', {}))))
+    inserted_id = cur.lastrowid
+    con.commit()
+    con.close()
+    return inserted_id
+
+
+def update_flow_execution(**kwargs):
+    con = sqlite3.connect(db_path)
+    cur = con.cursor()
+    keys = list(sorted(kwargs.keys()))
+    var = ','.join([f'{key}=?' for key in keys if key != 'id'])
+    sqlstr = f'UPDATE flow_execution SET {var},finished_at=current_date WHERE id=?'
+    values = [kwargs[key] for key in keys if key != 'id']
+    values.append(kwargs['id'])
+    cur.execute(sqlstr, values)
+    con.commit()
+    con.close()
+    return True
+
+
+def list_flow_execution(**kwargs):
+    con = sqlite3.connect(db_path)
+    cur = con.cursor()
+    cur.execute('SELECT id,flow_id,status,result,started_at,finished_at FROM flow_execution WHERE flow_id=? ORDER BY started_at DESC',
+                (kwargs['flow_id'],))
+    items = cur.fetchall()
+    con.close()
+    return [{'id': item[0], 'flow_id': item[1], 'status': item[2],
+             'result': json.loads(item[3]), 'started_at': item[4], 'finished_at': item[5]} for item in items]
