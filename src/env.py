@@ -104,10 +104,10 @@ class EnvironmentWindow:
         active_album(id=item['text'])
 
     def get_globals(self, name):
-        return retrieve_global_variable(name=name)
+        return retrieve_global_variable(name=name).strip()
 
     def get_variable(self, name):
-        return retrieve_active_variable(name=name)
+        return retrieve_active_variable(name=name).strip()
 
 
 class VariableWindow:

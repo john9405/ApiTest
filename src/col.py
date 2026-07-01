@@ -602,8 +602,8 @@ class CollectionWindow:
         if self.tree.parent(item_id):
             item = self.tree.item(self.tree.parent(item_id))
             if item["values"][1] == "project":
-                return retrieve_folder_variable(folder_id=item["values"][0], name=name)
-            return self.get_variable(self.tree.parent(item_id), name)
+                return retrieve_folder_variable(folder_id=item["values"][0], name=name).strip()
+            return self.get_variable(self.tree.parent(item_id), name).strip()
 
 
 class ProjectWindow:
