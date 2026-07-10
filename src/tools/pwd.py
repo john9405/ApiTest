@@ -40,8 +40,12 @@ class GenPwdWindow:
         password_label = ttk.Label(self.root, text="Generated:")
         password_label.grid(row=3, column=0)
 
-        self.pwd_entry = ttk.Entry(self.root)
-        self.pwd_entry.grid(row=3, column=1, columnspan=4, sticky='w')
+        self.pwd_entry = ttk.Entry(self.root, width=24)
+        self.pwd_entry.grid(row=3, column=1, columnspan=3, sticky='w')
+
+        # 复制密码按钮
+        copy_button = ttk.Button(self.root, text="Copy", command=self.copy_password)
+        copy_button.grid(row=3, column=4, sticky="w")
 
     def generate_password(self):
         password_length = self.l.get()
@@ -52,3 +56,8 @@ class GenPwdWindow:
         password = "".join(secrets.choice(alphabet) for _ in range(password_length)) if alphabet > "" else ""
         self.pwd_entry.delete(0, tk.END)
         self.pwd_entry.insert(0, password)
+
+    def copy_password(self):
+        """将生成的密码复制到剪贴板"""
+        self.root.clipboard_clear()
+        self.root.clipboard_append(self.pwd_entry.get())
