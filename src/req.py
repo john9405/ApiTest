@@ -479,10 +479,11 @@ class RequestWindow:
 
         ff = ttk.Frame(window)
         ff.pack(fill=tk.X)
-        ttk.Label(ff, textvariable=self.filepath).pack(side=tk.LEFT)
+        path_label = ttk.Label(ff, textvariable=self.filepath, cursor="hand2")
+        path_label.pack(side=tk.LEFT)
+        path_label.bind("<Double-1>", lambda e: self.on_rename())
         save_btn = ttk.Button(ff, text="Save", command=self.save_handler, bootstyle="primary")
         save_btn.pack(side=tk.RIGHT)
-        ttk.Button(ff, text='Rename', command=self.on_rename, bootstyle="secondary").pack(side=tk.RIGHT)
 
         north = ttk.Frame(window)
         north.pack(fill=tk.X)
