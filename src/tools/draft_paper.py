@@ -1,11 +1,10 @@
-from tkinter import *
-from tkinter.ttk import *
+from tkinter import ttk
 from tkinter.scrolledtext import ScrolledText
 
 
 class DraftPaper:
     def __init__(self, master=None):
-        root = Frame(master)
-        root.pack(fill=BOTH, expand=True)
-        Label(root, text='No content will be saved').pack(anchor='w')
-        ScrolledText(root).pack(fill=BOTH, expand=True)
+        root = ttk.Frame(master)
+        root.pack(fill="both", expand=True)
+        ttk.Label(root, text='No content will be saved').pack(anchor='w')
+        ScrolledText(root).pack(fill="both", expand=True)

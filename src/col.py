@@ -622,9 +622,9 @@ class ProjectWindow:
         frame = ttk.Frame(self.root)
         frame.pack(fill=tk.X)
         ttk.Label(frame, textvariable=self.filepath).pack(side=tk.LEFT)
-        save_btn = ttk.Button(frame, text="Save", command=self.on_save)
+        save_btn = ttk.Button(frame, text="Save", command=self.on_save, bootstyle="primary")
         save_btn.pack(side=tk.RIGHT)
-        ttk.Button(frame, text="Rename", command=self.on_rename).pack(side=tk.RIGHT)
+        ttk.Button(frame, text="Rename", command=self.on_rename, bootstyle="secondary").pack(side=tk.RIGHT)
 
         notebook = ttk.Notebook(self.root)
         self.overview = ScrolledText(notebook)

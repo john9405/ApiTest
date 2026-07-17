@@ -1,7 +1,7 @@
-from tkinter import *
+import tkinter as tk
 from tkinter import messagebox
 from tkinter.scrolledtext import ScrolledText
-from tkinter.ttk import *
+from tkinter import ttk
 
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives import serialization, hashes
@@ -67,26 +67,25 @@ def decrypt_message(private_key, encrypted_message):
 
 class RSAKeyFrame:
     def __init__(self, master=None):
-        self.root = Frame(master)
+        self.root = ttk.Frame(master)
         self.root.pack(fill='both', expand=True, padx=3, pady=3)
 
-        frame = Frame(self.root)
+        frame = ttk.Frame(self.root)
         frame.pack(fill='x')
 
-        Label(frame, text='Length:').pack(side="left")
-        self.combobox = Combobox(frame, values=("1024", "2048", "4096", "8192"), state="readonly")
+        ttk.Label(frame, text='Length:').pack(side="left")
+        self.combobox = ttk.Combobox(frame, values=("1024", "2048", "4096", "8192"), state="readonly")
         self.combobox.current(1)
         self.combobox.pack(side="left")
-        Label(frame, text='Password:').pack(side="left")
-        self.pwd = Entry(frame)
+        ttk.Label(frame, text='Password:').pack(side="left")
+        self.pwd = ttk.Entry(frame)
         self.pwd.pack(side="left")
-        button = Button(frame, text="Generate", command=self.generate)
-        button.pack(side="left")
-        lf1 = LabelFrame(self.root, text="Private key")
+        ttk.Button(frame, text="Generate", command=self.generate, bootstyle="primary").pack(side="left")
+        lf1 = ttk.LabelFrame(self.root, text="Private key")
         self.private_key_text = ScrolledText(lf1, width=50, height=10)
         self.private_key_text.pack(fill='both', expand=True)
         lf1.pack(fill='both', expand=True)
-        lf2 = LabelFrame(self.root, text="Public key")
+        lf2 = ttk.LabelFrame(self.root, text="Public key")
         self.public_key_text = ScrolledText(lf2, width=50, height=10)
         self.public_key_text.pack(fill='both', expand=True)
         lf2.pack(fill='both', expand=True)
@@ -97,28 +96,28 @@ class RSAKeyFrame:
         pwd = self.pwd.get()
         pwd = None if pwd == "" else pwd.encode()
         private_key, public_key = generate_keys(key_size)
-        self.private_key_text.delete(1.0, END)
-        self.public_key_text.delete(1.0, END)
-        self.private_key_text.insert(END, serialize_private_key(private_key, pwd))
-        self.public_key_text.insert(END, serialize_public_key(public_key))
+        self.private_key_text.delete("1.0", tk.END)
+        self.public_key_text.delete("1.0", tk.END)
+        self.private_key_text.insert(tk.END, serialize_private_key(private_key, pwd))
+        self.public_key_text.insert(tk.END, serialize_public_key(public_key))
 
 
 class RsaPublicKey:
     def __init__(self, master=None):
-        self.root = Frame(master)
+        self.root = ttk.Frame(master)
         self.root.pack(fill='both', expand=True, padx=3, pady=3)
 
-        lf1 = LabelFrame(self.root, text="Private key")
+        lf1 = ttk.LabelFrame(self.root, text="Private key")
         self.private_key_text = ScrolledText(lf1, width=50, height=10)
         self.private_key_text.pack(fill='both', expand=True)
         lf1.pack(fill='both', expand=True)
-        frame = Frame(self.root)
-        Label(frame, text="Password:").pack(side='left')
-        self.pwd = Entry(frame)
+        frame = ttk.Frame(self.root)
+        ttk.Label(frame, text="Password:").pack(side='left')
+        self.pwd = ttk.Entry(frame)
         self.pwd.pack(side='left')
-        Button(frame, text="Generate", command=self.generate).pack(side='left')
+        ttk.Button(frame, text="Generate", command=self.generate, bootstyle="primary").pack(side='left')
         frame.pack(fill='x')
-        lf3 = LabelFrame(self.root, text="Public key")
+        lf3 = ttk.LabelFrame(self.root, text="Public key")
         self.public_key_text = ScrolledText(lf3, width=50, height=10)
         self.public_key_text.pack(fill='both', expand=True)
         lf3.pack(fill='both', expand=True)
@@ -136,28 +135,28 @@ class RsaPublicKey:
             messagebox.showerror("Error", "Private key is incorrect")
             return
         public_key = private_key.public_key()
-        self.public_key_text.delete(1.0, END)
-        self.public_key_text.insert(END, serialize_public_key(public_key))
+        self.public_key_text.delete("1.0", tk.END)
+        self.public_key_text.insert(tk.END, serialize_public_key(public_key))
 
 
 class RSACheck:
     def __init__(self, master=None):
-        self.root = Frame(master)
+        self.root = ttk.Frame(master)
         self.root.pack(fill='both', expand=True, padx=3, pady=3)
 
-        frame = Frame(self.root)
+        frame = ttk.Frame(self.root)
         frame.pack(side='bottom', fill='x')
-        Label(frame, text="Password:").pack(side='left')
-        self.pwd = Entry(frame)
+        ttk.Label(frame, text="Password:").pack(side='left')
+        self.pwd = ttk.Entry(frame)
         self.pwd.pack(side='left')
-        Button(frame, text="Check", command=self.check).pack(side='left')
-        self.res = Label(frame)
+        ttk.Button(frame, text="Check", command=self.check, bootstyle="primary").pack(side='left')
+        self.res = ttk.Label(frame)
         self.res.pack(side='left', padx=3)
-        lf1 = LabelFrame(self.root, text='Private Key')
+        lf1 = ttk.LabelFrame(self.root, text='Private Key')
         self.private_key_text = ScrolledText(lf1, width=50, height=10)
         self.private_key_text.pack(fill='both', expand=True)
         lf1.pack(fill='both', expand=True)
-        lf2 = LabelFrame(self.root, text='Public Key')
+        lf2 = ttk.LabelFrame(self.root, text='Public Key')
         self.public_key_text = ScrolledText(lf2, width=50, height=10)
         self.public_key_text.pack(fill='both', expand=True)
         lf2.pack(fill='both', expand=True)
@@ -196,19 +195,19 @@ class RSACheck:
 
 class RSAEncrypt:
     def __init__(self, master=None):
-        self.root = Frame(master)
+        self.root = ttk.Frame(master)
         self.root.pack(fill='both', expand=True, padx=3, pady=3)
 
-        lf1 = LabelFrame(self.root, text="Raw text")
+        lf1 = ttk.LabelFrame(self.root, text="Raw text")
         self.raw_text = ScrolledText(lf1, width=50, height=5)
         self.raw_text.pack(fill='both', expand=True)
         lf1.pack(fill='both', expand=True)
-        lf2 = LabelFrame(self.root, text="Public key")
+        lf2 = ttk.LabelFrame(self.root, text="Public key")
         self.public_key_text = ScrolledText(lf2, width=50, height=5)
         self.public_key_text.pack(fill='both', expand=True)
         lf2.pack(fill='both', expand=True)
-        Button(self.root, text="Encrypt", command=lambda: self.encrypt()).pack()
-        lf4 = LabelFrame(self.root, text="Encrypted text")
+        ttk.Button(self.root, text="Encrypt", command=lambda: self.encrypt(), bootstyle="primary").pack()
+        lf4 = ttk.LabelFrame(self.root, text="Encrypted text")
         self.encrypt_text = ScrolledText(lf4, width=50, height=5)
         self.encrypt_text.pack(fill='both', expand=True)
         lf4.pack(fill='both', expand=True)
@@ -222,29 +221,29 @@ class RSAEncrypt:
             return
         message = self.raw_text.get("1.0", "end")
         encrypted_message = encrypt_message(public_key, message.encode())
-        self.encrypt_text.delete('1.0', 'end')
-        self.encrypt_text.insert('1.0', encrypted_message.decode())
+        self.encrypt_text.delete("1.0", tk.END)
+        self.encrypt_text.insert(tk.END, encrypted_message.decode())
 
 
 class RSADecrypt:
     def __init__(self, master=None):
-        self.root = Frame(master)
+        self.root = ttk.Frame(master)
         self.root.pack(fill='both', expand=True, padx=3, pady=3)
-        lf1 = LabelFrame(self.root, text="Encrypted text")
+        lf1 = ttk.LabelFrame(self.root, text="Encrypted text")
         self.encrypt_text = ScrolledText(lf1, width=50, height=5)
         self.encrypt_text.pack(fill='both', expand=True)
         lf1.pack(fill='both', expand=True)
-        lf2 = LabelFrame(self.root, text="Private key")
+        lf2 = ttk.LabelFrame(self.root, text="Private key")
         self.private_key_text = ScrolledText(lf2, width=50, height=5)
         self.private_key_text.pack(fill='both', expand=True)
         lf2.pack(fill='both', expand=True)
-        f3 = Frame(self.root)
-        Label(f3, text="Password:").pack(side="left")
-        self.pwd = Entry(f3)
+        f3 = ttk.Frame(self.root)
+        ttk.Label(f3, text="Password:").pack(side="left")
+        self.pwd = ttk.Entry(f3)
         self.pwd.pack(side="left")
-        Button(f3, text="Decrypt", command=self.decrypt).pack(side="left")
+        ttk.Button(f3, text="Decrypt", command=self.decrypt, bootstyle="primary").pack(side="left")
         f3.pack(fill='x')
-        lf4 = LabelFrame(self.root, text="Decrypted text")
+        lf4 = ttk.LabelFrame(self.root, text="Decrypted text")
         self.raw_text = ScrolledText(lf4, width=50, height=5)
         self.raw_text.pack(fill='both', expand=True)
         lf4.pack(fill='both', expand=True)
@@ -267,5 +266,5 @@ class RSADecrypt:
         except ValueError as e:
             messagebox.showerror("Error", str(e))
             return
-        self.raw_text.delete('1.0', 'end')
-        self.raw_text.insert('1.0', decrypted_message.decode())
+        self.raw_text.delete("1.0", tk.END)
+        self.raw_text.insert(tk.END, decrypted_message.decode())

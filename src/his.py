@@ -100,4 +100,4 @@ class HistoryWindow:
             "res_headers":"",
             "res_cookies":""
         })
-        self.treeview.insert("", 0, text=inserted_id, values=(data.get('method' ''), data.get('url', '')))
+        self.treeview.insert("", 0, text=inserted_id, values=(data.get('method', ''), data.get('url', '')))

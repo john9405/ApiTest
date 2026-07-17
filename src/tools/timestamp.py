@@ -67,7 +67,7 @@ class TimestampWindow:
         ttk.Label(self.root, text="Datetime:").grid(row=0, column=3, sticky='w')
         datetime_entry = ttk.Entry(self.root)
         btn = ttk.Button(
-            self.root, text="->", width=4,
+            self.root, text="->", width=4, bootstyle="primary",
             command=lambda: timestamp_to_datetime(timestamp_entry, datetime_entry)
         )
         btn.grid(row=0, column=2)
@@ -81,7 +81,7 @@ class TimestampWindow:
         ttk.Label(self.root, text="Timestamp:").grid(row=1, column=3, sticky='w')
         timestamp_entry = ttk.Entry(self.root)
         btn = ttk.Button(
-            self.root, text="->", width=4,
+            self.root, text="->", width=4, bootstyle="primary",
             command=lambda: datetime_to_timestamp(datetime_entry, timestamp_entry)
         )
         btn.grid(row=1, column=2)
@@ -94,14 +94,14 @@ class TimestampWindow:
         timestamp_entry = ttk.Entry(self.root)
         timestamp_entry.grid(row=3, column=1)
         ttk.Button(
-            self.root, text="Copy", width=5,
+            self.root, text="Copy", width=5, bootstyle="info",
             command=lambda: self._copy_to_clipboard(timestamp_entry)
         ).grid(row=3, column=2)
         ttk.Label(self.root, text="Date:").grid(row=4, column=0, sticky='w')
         datetime_entry = ttk.Entry(self.root)
         datetime_entry.grid(row=4, column=1, pady=3)
         ttk.Button(
-            self.root, text="Copy", width=5,
+            self.root, text="Copy", width=5, bootstyle="info",
             command=lambda: self._copy_to_clipboard(datetime_entry)
         ).grid(row=4, column=2)
         thread = threading.Thread(target=update_now, args=(timestamp_entry, datetime_entry,))

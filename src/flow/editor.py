@@ -679,15 +679,15 @@ class FlowEditor:
         toolbar = ttk.Frame(self.root)
         toolbar.pack(fill=tk.X, padx=4, pady=2)
 
-        self.run_btn = ttk.Button(toolbar, text="▶ Run", command=self.run_flow)
+        self.run_btn = ttk.Button(toolbar, text="▶ Run", command=self.run_flow, bootstyle="success")
         self.run_btn.pack(side=tk.LEFT, padx=1)
 
-        self.stop_btn = ttk.Button(toolbar, text="■ Stop", command=self.stop_flow, state=tk.DISABLED)
+        self.stop_btn = ttk.Button(toolbar, text="■ Stop", command=self.stop_flow, state=tk.DISABLED, bootstyle="danger")
         self.stop_btn.pack(side=tk.LEFT, padx=1)
 
         ttk.Separator(toolbar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=4)
 
-        save_btn = ttk.Button(toolbar, text="Save", command=self.save)
+        save_btn = ttk.Button(toolbar, text="Save", command=self.save, bootstyle="primary")
         save_btn.pack(side=tk.LEFT, padx=1)
 
         ttk.Separator(toolbar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=4)

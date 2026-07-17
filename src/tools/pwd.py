@@ -33,7 +33,7 @@ class GenPwdWindow:
         ttk.Checkbutton(self.root, text="other", variable=self.pcb).grid(row=1, column=4)
 
         # 生成密码按钮
-        generate_button = ttk.Button(self.root, text="Generate", command=self.generate_password)
+        generate_button = ttk.Button(self.root, text="Generate", command=self.generate_password, bootstyle="primary")
         generate_button.grid(row=2, column=1, columnspan=4, sticky='w')
 
         # 生成密码的标签
@@ -44,7 +44,7 @@ class GenPwdWindow:
         self.pwd_entry.grid(row=3, column=1, columnspan=3, sticky='w')
 
         # 复制密码按钮
-        copy_button = ttk.Button(self.root, text="Copy", command=self.copy_password)
+        copy_button = ttk.Button(self.root, text="Copy", command=self.copy_password, bootstyle="info")
         copy_button.grid(row=3, column=4, sticky="w")
 
     def generate_password(self):

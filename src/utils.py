@@ -106,9 +106,10 @@ class EditorTable(ttk.Frame):
             ttk.Button(
                 action_bar,
                 text="Submit",
+                bootstyle="primary",
                 command=lambda: self.commit(item_id, win, name_entry, value_entry),
             ).pack(side="left")
-        ttk.Button(action_bar, text="Cancel", command=win.destroy).pack(side="left")
+        ttk.Button(action_bar, text="Cancel", bootstyle="secondary", command=win.destroy).pack(side="left")
         action_bar.pack(pady=(10, 0))
 
     def commit(

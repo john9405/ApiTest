@@ -210,7 +210,7 @@ class OauthFrame(ttk.Frame):
         ttk.Label(self.main_frame, text="Access Token").grid(row=1, column=0, sticky="w", pady=3)
         ttk.Entry(self.main_frame, textvariable=self.resource_owner_key).grid(row=1, column=1, sticky="ew")
         ttk.Label(self.main_frame, text="Private key").grid(row=2, column=0, sticky="w")
-        ttk.Button(self.main_frame, text="Select File", command=self.on_open).grid(row=2, column=1, sticky="w")
+        ttk.Button(self.main_frame, text="Select File", command=self.on_open, bootstyle="info").grid(row=2, column=1, sticky="w")
         self.rsa_key_text = ScrolledText(self.main_frame, width=40, height=30)
         self.rsa_key_text.grid(row=3, column=1, sticky="nsew")
         self.main_frame.pack(fill="both", expand=True)
@@ -480,9 +480,9 @@ class RequestWindow:
         ff = ttk.Frame(window)
         ff.pack(fill=tk.X)
         ttk.Label(ff, textvariable=self.filepath).pack(side=tk.LEFT)
-        save_btn = ttk.Button(ff, text="Save", command=self.save_handler)
+        save_btn = ttk.Button(ff, text="Save", command=self.save_handler, bootstyle="primary")
         save_btn.pack(side=tk.RIGHT)
-        ttk.Button(ff, text='Rename', command=self.on_rename).pack(side=tk.RIGHT)
+        ttk.Button(ff, text='Rename', command=self.on_rename, bootstyle="secondary").pack(side=tk.RIGHT)
 
         north = ttk.Frame(window)
         north.pack(fill=tk.X)
@@ -491,7 +491,7 @@ class RequestWindow:
         self.method_box.current(0)
         self.method_box["state"] = "readonly"
         self.method_box.pack(side=tk.LEFT)
-        sub_btn = ttk.Button(north, text="Send")  # Send request button
+        sub_btn = ttk.Button(north, text="Send", bootstyle="success")  # Send request button
         sub_btn.config(command=self.send_request)  # Bind the event handler to send the request button
         sub_btn.pack(side=tk.RIGHT)
         self.url = tk.StringVar()

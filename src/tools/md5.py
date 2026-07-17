@@ -12,7 +12,7 @@ class MD5GUI:
         self.init_data_text = ScrolledText(init_data_label, height=10)  # Raw data entry box
         self.init_data_text.pack(fill='both', expand=True)
         init_data_label.pack(fill='both', expand=True)
-        ttk.Button(self.root, text="MD5", width=10, command=self.str_trans_to_md5).pack()
+        ttk.Button(self.root, text="MD5", width=10, command=self.str_trans_to_md5, bootstyle="primary").pack()
         result_data_label = ttk.LabelFrame(self.root, text="Output")
         self.result_data_text = ScrolledText(result_data_label, height=10)  # Processing result presentation
         self.result_data_text.pack(fill='both', expand=True)

@@ -4,6 +4,8 @@ import uuid
 from tkinter import font as tkfont
 from tkinter import ttk
 
+import ttkbootstrap as tb
+
 from .his import HistoryWindow
 from .req import RequestWindow
 from .col import CollectionWindow, ProjectWindow, FolderWindow
@@ -72,6 +74,119 @@ def _create_history_icon(size=30):
     return image
 
 
+# ---------------------------------------------------------------------------
+# Custom widgets
+# ---------------------------------------------------------------------------
+
+class ScrollableFrame(ttk.Frame):
+    """A vertically scrollable frame using a Canvas + Scrollbar."""
+
+    def __init__(self, parent, **kwargs):
+        super().__init__(parent, **kwargs)
+        self.canvas = tk.Canvas(self, borderwidth=0, highlightthickness=0)
+        self.scrollbar = ttk.Scrollbar(self, orient=tk.VERTICAL, command=self.canvas.yview)
+        self.inner = ttk.Frame(self.canvas)
+
+        self._inner_id = self.canvas.create_window((0, 0), window=self.inner, anchor="nw")
+
+        self.canvas.configure(yscrollcommand=self.scrollbar.set)
+
+        self.scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        self.inner.bind("<Configure>", self._on_inner_configure)
+        self.canvas.bind("<Configure>", self._on_canvas_configure)
+
+        # Mouse-wheel scrolling — cross-platform
+        self.canvas.bind("<Enter>", self._bind_scroll)
+        self.canvas.bind("<Leave>", self._unbind_scroll)
+
+    def _on_inner_configure(self, _event):
+        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+
+    def _on_canvas_configure(self, event):
+        self.canvas.itemconfig(self._inner_id, width=event.width)
+
+    def _bind_scroll(self, _event):
+        self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
+        self.canvas.bind_all("<Button-4>", self._on_mousewheel)
+        self.canvas.bind_all("<Button-5>", self._on_mousewheel)
+
+    def _unbind_scroll(self, _event):
+        self.canvas.unbind_all("<MouseWheel>")
+        self.canvas.unbind_all("<Button-4>")
+        self.canvas.unbind_all("<Button-5>")
+
+    def _on_mousewheel(self, event):
+        if event.num == 4:
+            self.canvas.yview_scroll(-1, "units")
+        elif event.num == 5:
+            self.canvas.yview_scroll(1, "units")
+        else:
+            # Windows / macOS trackpad
+            delta = event.delta
+            if abs(delta) < 10:
+                delta = int(delta)
+            else:
+                delta = int(delta / 120)
+            self.canvas.yview_scroll(int(-1 * delta), "units")
+
+
+class CollapsingFrame(ttk.Frame):
+    """A collapsible section with a clickable header that toggles content.
+
+    Parameters
+    ----------
+    parent : widget
+        Parent widget.
+    text : str
+        Section title shown in the header.
+    start_open : bool
+        Whether the section starts expanded (default True).
+    """
+
+    def __init__(self, parent, text="", start_open=True, **kwargs):
+        super().__init__(parent, **kwargs)
+        self._is_open = tk.BooleanVar(value=start_open)
+
+        # -- header --
+        header = ttk.Frame(self, style="primary.TFrame")
+        header.pack(fill=tk.X)
+
+        arrow = "▼" if start_open else "▶"
+        self._toggle_btn = ttk.Label(header, text=arrow, width=2, anchor="center",
+                                     style="inverse-primary.TLabel")
+        self._toggle_btn.pack(side=tk.LEFT, padx=(2, 0), pady=1)
+
+        self._label = ttk.Label(header, text=text, style="inverse-primary.TLabel",
+                                font=("TkDefaultFont", 10, "bold"))
+        self._label.pack(side=tk.LEFT, padx=4, pady=2, fill=tk.X, expand=True)
+
+        # Make the whole header clickable
+        for w in (header, self._toggle_btn, self._label):
+            w.bind("<Button-1>", lambda e: self._toggle())
+
+        # -- separator --
+        ttk.Separator(self, orient=tk.HORIZONTAL).pack(fill=tk.X)
+
+        # -- content --
+        self.content = ttk.Frame(self)
+        if start_open:
+            self.content.pack(fill=tk.BOTH, expand=True, pady=(2, 0))
+
+    def _toggle(self):
+        if self._is_open.get():
+            self.content.pack_forget()
+            self._toggle_btn.configure(text="▶")
+        else:
+            self.content.pack(fill=tk.BOTH, expand=True, pady=(2, 0))
+            self._toggle_btn.configure(text="▼")
+        self._is_open.set(not self._is_open.get())
+
+
+# ---------------------------------------------------------------------------
+# Canvas-based tab bar (kept as-is — it renders its own look)
+# ---------------------------------------------------------------------------
 
 class CanvasSidebarTabs:
     NAV_WIDTH = 44
@@ -183,8 +298,6 @@ class CanvasSidebarTabs:
 
     def _on_configure(self, _event):
         self._redraw()
-
-
 
 
 class CanvasNotebook(ttk.Frame):
@@ -477,100 +590,144 @@ class CanvasNotebook(ttk.Frame):
         self._redraw()
 
 
+# ---------------------------------------------------------------------------
+# Main application window
+# ---------------------------------------------------------------------------
+
 class MainWindow:
     tag_list = []  # List of enabled labels
 
     def __init__(self):
-        self.root = tk.Tk()
-        # Create main window
+        # ---- ttkbootstrap-themed root window ----
+        self.root = tb.Window(themename="litera")
         self.root.title("HTTP Client")
         self.root.geometry("1280x720")
 
+        # ---- tool registry ----
         self.tool_entries = [
-            {"label": "AES", "ui": AesGui, "text": "AES"},
-            {"label": "Base64", "ui": Base64GUI, "text": "Base64"},
-            {"label": "DraftPaper", "ui": DraftPaper, "text": "DraftPaper"},
-            {"label": "MD5", "ui": MD5GUI, "text": "MD5"},
-            {"label": "Password", "ui": GenPwdWindow, "text": "Password"},
-            {"label": "Regular Expression", "ui": RegexWindow, "text": "Regular Expression "},
-            {"label": "Regular Expression Example", "ui": CommonlyUsed, "text": "Common Regular Expressions"},
-            {"label": "RSA Key", "ui": RSAKeyFrame, "text": "RSA Key"},
-            {"label": "RSA Public Key", "ui": RsaPublicKey, "text": "RSA Public Key"},
-            {"label": "RSA Check", "ui": RSACheck, "text": "RSA Check"},
-            {"label": "RSA Encrypt", "ui": RSAEncrypt, "text": "RSA Encrypt"},
-            {"label": "RSA Decrypt", "ui": RSADecrypt, "text": "RSA Decrypt"},
-            {"label": "Timestamp", "ui": TimestampWindow, "text": "Timestamp"},
+            {"label": "AES",              "ui": AesGui,           "text": "AES"},
+            {"label": "Base64",           "ui": Base64GUI,         "text": "Base64"},
+            {"label": "DraftPaper",       "ui": DraftPaper,        "text": "DraftPaper"},
+            {"label": "MD5",              "ui": MD5GUI,            "text": "MD5"},
+            {"label": "Password",         "ui": GenPwdWindow,      "text": "Password"},
+            {"label": "Regular Expression","ui": RegexWindow,       "text": "Regular Expression "},
+            {"label": "Regex Examples",   "ui": CommonlyUsed,      "text": "Common Regular Expressions"},
+            {"label": "RSA Key",          "ui": RSAKeyFrame,       "text": "RSA Key"},
+            {"label": "RSA Public Key",   "ui": RsaPublicKey,      "text": "RSA Public Key"},
+            {"label": "RSA Check",        "ui": RSACheck,          "text": "RSA Check"},
+            {"label": "RSA Encrypt",      "ui": RSAEncrypt,        "text": "RSA Encrypt"},
+            {"label": "RSA Decrypt",      "ui": RSADecrypt,        "text": "RSA Decrypt"},
+            {"label": "Timestamp",        "ui": TimestampWindow,    "text": "Timestamp"},
         ]
 
-        # Status bar at bottom — must be packed BEFORE main_frame so it
-        # reserves space first; otherwise main_frame can push it off-screen
-        # when internal layout changes (e.g. adding a new tab).
+        # ---- top toolbar ----
+        toolbar = ttk.Frame(self.root)
+        toolbar.pack(side=tk.TOP, fill=tk.X)
+
+        # ---- status bar ----
         status_bar = ttk.Frame(self.root)
         status_bar.pack(side=tk.BOTTOM, fill=tk.X)
 
-        tools_mb = tk.Menubutton(status_bar, text="tools", relief=tk.RAISED)
-        tools_mb.pack(side=tk.LEFT)
-
-        tools_menu = tk.Menu(tools_mb, tearoff=False)
-        for entry in self.tool_entries:
-            tools_menu.add_command(
-                label=entry["label"],
-                command=lambda ui=entry["ui"], text=entry["text"]: self.new_tab(ui, text)
-            )
-        tools_mb.config(menu=tools_menu)
-
+        # ---- main area ----
         main_frame = ttk.Frame(self.root)
         main_frame.pack(fill=tk.BOTH, expand=True)
+
         content_frame = ttk.Frame(main_frame)
         content_frame.pack(fill=tk.BOTH, expand=True)
 
-        panel_window = ttk.PanedWindow(content_frame, orient="horizontal")
+        panel_window = ttk.PanedWindow(content_frame, orient=tk.HORIZONTAL)
 
-        sidebar_frame = ttk.Frame(panel_window)
-        nba = ttk.PanedWindow(sidebar_frame, orient=tk.VERTICAL)
-        nba.pack(fill=tk.BOTH, expand=True)
-        col_top = ttk.Frame(nba)
-        self.col_win = CollectionWindow(col_top, **{"callback": self.collection})
-        nba.add(col_top, weight=1)
-        self.flow_win = FlowWindow(nba, callback=self.flow_callback)
-        nba.add(self.flow_win.root, weight=1)
-        panel_window.add(sidebar_frame, weight=2)
+        # ==================================================================
+        # Left sidebar — scrollable, 5 collapsible sections
+        # ==================================================================
+        left_sidebar = ScrollableFrame(panel_window)
 
+        # -- 1. Collections --
+        col_section = CollapsingFrame(left_sidebar.inner, text="📁 Collections", start_open=True)
+        col_section.pack(fill=tk.X, padx=2, pady=(4, 0))
+        self.col_win = CollectionWindow(col_section.content, **{"callback": self.collection})
+
+        # -- 2. History --
+        his_section = CollapsingFrame(left_sidebar.inner, text="📜 History", start_open=False)
+        his_section.pack(fill=tk.X, padx=2, pady=(4, 0))
+        self.history_window = HistoryWindow(his_section.content, self.history)
+
+        # -- 3. Environments --
+        env_section = CollapsingFrame(left_sidebar.inner, text="🌐 Environments", start_open=False)
+        env_section.pack(fill=tk.X, padx=2, pady=(4, 0))
+        self.env_win = EnvironmentWindow(master=env_section.content, callback=self.environment)
+        self.env_win.root.pack(fill=tk.BOTH, expand=True)
+
+        # -- 4. Flows --
+        flow_section = CollapsingFrame(left_sidebar.inner, text="🔄 Flows", start_open=False)
+        flow_section.pack(fill=tk.X, padx=2, pady=(4, 0))
+        self.flow_win = FlowWindow(flow_section.content, callback=self.flow_callback)
+        self.flow_win.root.pack(fill=tk.BOTH, expand=True)
+
+        # -- 5. Tools --
+        tools_section = CollapsingFrame(left_sidebar.inner, text="🛠️ Tools", start_open=False)
+        tools_section.pack(fill=tk.X, padx=2, pady=(4, 0))
+        self._build_tools_panel(tools_section.content)
+
+        # Pad the bottom so content doesn't clip against the window edge
+        ttk.Frame(left_sidebar.inner, height=8).pack(fill=tk.X)
+
+        panel_window.add(left_sidebar, weight=2)
+
+        # ==================================================================
+        # Center — tabbed notebook (unchanged)
+        # ==================================================================
         nbb = CanvasNotebook(panel_window, add_command=self.new_request, close_command=self.close_tab)
         self.nbb = nbb
         panel_window.add(nbb, weight=10)
 
-        # Right sidebar
-        right_side_bar = ttk.Frame(panel_window)
-        rsbpw = ttk.PanedWindow(right_side_bar, orient=tk.VERTICAL)
-        rsbpw.pack(fill=tk.BOTH, expand=True)
+        panel_window.pack(fill="both", expand=True)
 
-        self.env_win = EnvironmentWindow(master=rsbpw, callback=self.environment)
-        rsbpw.add(self.env_win.root, weight=1)
-
-        history_top = ttk.Frame(rsbpw)
-        self.history_window = HistoryWindow(history_top, self.history)
-        rsbpw.add(history_top, weight=1)
-
-        panel_window.add(right_side_bar, weight=2)
-        panel_window.pack(fill='both', expand=True)
-
-        menu = tk.Menu(self.root)
-        file_menu = tk.Menu(menu, tearoff=False)
-        file_menu.add_command(label="New request", command=self.new_request)
-        file_menu.add_command(label="New collection", command=self.col_win.new_proj)
-        file_menu.add_command(label="Import", command=self.col_win.open_proj)
-        file_menu.add_command(label="Export", command=self.col_win.export_proj)
-        file_menu.add_command(label="Exit", command=self.on_closing)
-        menu.add_cascade(label="File", menu=file_menu)
-        help_menu = tk.Menu(menu, tearoff=False)
-        help_menu.add_command(label="Help", command=lambda: self.new_tab(HelpWindow, "Help"))
-        help_menu.add_command(label="About", command=lambda: self.new_tab(AboutWindow, "About"))
-        menu.add_cascade(label="Help", menu=help_menu)
-        self.root.config(menu=menu)
+        ttk.Button(toolbar, text="📝", bootstyle="link",
+                   command=self.new_request).pack(side=tk.LEFT, padx=2)
+        ttk.Button(toolbar, text="📁", bootstyle="link",
+                   command=self.col_win.new_proj).pack(side=tk.LEFT, padx=2)
+        ttk.Separator(toolbar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=4)
+        ttk.Button(toolbar, text="📥", bootstyle="link",
+                   command=self.col_win.open_proj).pack(side=tk.LEFT, padx=2)
+        ttk.Button(toolbar, text="📤", bootstyle="link",
+                   command=self.col_win.export_proj).pack(side=tk.LEFT, padx=2)
+        ttk.Separator(toolbar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=4)
+        ttk.Button(toolbar, text="❓", bootstyle="link",
+                   command=lambda: self.new_tab(HelpWindow, "Help")).pack(side=tk.LEFT, padx=2)
+        ttk.Button(toolbar, text="ℹ️", bootstyle="link",
+                   command=lambda: self.new_tab(AboutWindow, "About")).pack(side=tk.LEFT, padx=2)
 
         self.on_start()
 
+    # ------------------------------------------------------------------
+    # Tools panel helper
+    # ------------------------------------------------------------------
+    def _build_tools_panel(self, parent):
+        """Populate the Tools collapsible section with a scrollable button grid."""
+        tools_inner = ttk.Frame(parent)
+        tools_inner.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+
+        row = col = 0
+        max_cols = 2
+        for entry in self.tool_entries:
+            btn = ttk.Button(
+                tools_inner, text=entry["label"], bootstyle="outline-secondary",
+                command=lambda ui=entry["ui"], text=entry["text"]: self.new_tab(ui, text),
+            )
+            btn.grid(row=row, column=col, sticky="ew", padx=2, pady=2)
+            col += 1
+            if col >= max_cols:
+                col = 0
+                row += 1
+
+        # Make columns expand equally
+        for c in range(max_cols):
+            tools_inner.columnconfigure(c, weight=1)
+
+    # ------------------------------------------------------------------
+    # Tab management
+    # ------------------------------------------------------------------
     def new_request(self, data=None, **kwargs):
         tl = ttk.Frame(self.nbb.body)
         req_win = RequestWindow(
@@ -581,7 +738,7 @@ class MainWindow:
             local_variable=self.col_win.get_variable,
             cache_history=self.history_window.on_cache,
             save_item=self.col_win.save_item,
-            path=kwargs.get('path', "Name:"),
+            path=kwargs.get("path", "Name:"),
             callback=self.request,
         )
         req_win.item_id = kwargs.get("item_id")
@@ -616,18 +773,18 @@ class MainWindow:
         self.root.destroy()
 
     def request(self, **kwargs):
-        name = kwargs.get('name')
+        name = kwargs.get("name")
         if name is not None:
             self.nbb.tab(self.nbb.index("current"), text=name)
-        item_id = kwargs.get('item_id')
+        item_id = kwargs.get("item_id")
         if item_id is not None:
             index = self.nbb.index("current")
             self.tag_list[index] = f"col_{kwargs['item_id']}"
 
     def collection(self, **kwargs):
-        if kwargs.get('action') == 'rename':
+        if kwargs.get("action") == "rename":
             if f"col_{kwargs['item_id']}" in self.tag_list:
-                self.nbb.tab(self.tag_list.index(f'col_{kwargs.get("item_id")}'), text=kwargs.get('name'))
+                self.nbb.tab(self.tag_list.index(f'col_{kwargs.get("item_id")}'), text=kwargs.get("name"))
             return
 
         if f"col_{kwargs['item_id']}" in self.tag_list:
@@ -642,7 +799,7 @@ class MainWindow:
                 callback=self.col_win.save_item,
                 data=kwargs["data"],
             )
-            self.nbb.add(frame, text=kwargs["data"]['name'])
+            self.nbb.add(frame, text=kwargs["data"]["name"])
             self.nbb.select(frame)
         elif kwargs["tag"] == "folder":
             frame = ttk.Frame(self.nbb.body)
@@ -651,26 +808,26 @@ class MainWindow:
                 item_id=kwargs["item_id"],
                 callback=self.col_win.save_item,
                 data=kwargs["data"],
-                path=kwargs['path'],
+                path=kwargs["path"],
             )
-            self.nbb.add(frame, text=kwargs["data"]['name'])
+            self.nbb.add(frame, text=kwargs["data"]["name"])
             self.nbb.select(frame)
         else:
-            self.new_request(kwargs["data"], item_id=kwargs["item_id"], path=kwargs['path'], )
+            self.new_request(kwargs["data"], item_id=kwargs["item_id"], path=kwargs["path"])
         self.tag_list.append(f"col_{kwargs['item_id']}")
 
     def history(self, **kwargs):
         """History callback"""
-        if kwargs['data']['uuid'] in self.tag_list:
-            self.nbb.select(self.tag_list.index(kwargs['data']['uuid']))
+        if kwargs["data"]["uuid"] in self.tag_list:
+            self.nbb.select(self.tag_list.index(kwargs["data"]["uuid"]))
             return
         self.new_request(kwargs.get("data"))
-        self.tag_list.append(kwargs['data']['uuid'])
+        self.tag_list.append(kwargs["data"]["uuid"])
 
     def environment(self, **kwargs):
-        if kwargs.get('action') == 'rename':
+        if kwargs.get("action") == "rename":
             if f'env_{kwargs.get("item_id")}' in self.tag_list:
-                self.nbb.tab(self.tag_list.index(f'env_{kwargs.get("item_id")}'), text=kwargs.get('collection'))
+                self.nbb.tab(self.tag_list.index(f'env_{kwargs.get("item_id")}'), text=kwargs.get("collection"))
             return
 
         if f'env_{kwargs.get("item_id")}' in self.tag_list:
@@ -680,7 +837,7 @@ class MainWindow:
         frame = ttk.Frame(self.nbb.body)
         VariableWindow(
             frame,
-            item_id=kwargs.get('item_id'),
+            item_id=kwargs.get("item_id"),
             collection=kwargs.get("collection"),
             data_id=kwargs.get("data_id"),
             set_variable=self.env_win.set_variable,
@@ -722,11 +879,8 @@ class MainWindow:
 
     def previous_tab(self):
         try:
-            # 获取当前选中的选项卡的索引
             current_tab_index = self.nbb.index("current")
-            # 计算上一个选项卡的索引
             previous_tab_index = (current_tab_index - 1) % self.nbb.index("end")
-            # 选中上一个选项卡
             self.nbb.select(previous_tab_index)
         except tk.TclError:
             pass
@@ -751,12 +905,12 @@ class MainWindow:
 
     def close_tab(self, index=None):
         try:
-            current_index = self.nbb.index('current') if index is None else index
+            current_index = self.nbb.index("current") if index is None else index
             tag = self.tag_list[current_index]
             # Check if it's a flow editor tab — prompt to save unsaved changes
             if tag.startswith("flow_"):
                 frame = self.nbb.select(current_index)
-                if frame and hasattr(frame, 'flow_editor') and frame.flow_editor.is_dirty:
+                if frame and hasattr(frame, "flow_editor") and frame.flow_editor.is_dirty:
                     from tkinter import messagebox
                     if messagebox.askyesno("Unsaved Changes", "Save changes before closing?"):
                         frame.flow_editor.save()

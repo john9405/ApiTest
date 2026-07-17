@@ -121,11 +121,12 @@ class VariableWindow:
         self.col_name = kwargs.get('collection')
         self.callback = kwargs.get('set_variable')
 
-        ttk.Button(frame, text='Save', command=self.on_save).pack(side=tk.RIGHT)
+        ttk.Button(frame, text='Save', command=self.on_save, bootstyle="primary").pack(side=tk.RIGHT)
         if kwargs.get("collection") != 'Globals':
-            ttk.Button(frame,text="Active", command=lambda: kwargs.get("set_active")(kwargs.get("item_id"))).pack(side=tk.RIGHT)
-            ttk.Button(frame, text='Rename', command=self.on_rename).pack(side=tk.RIGHT)
-        ttk.Button(frame, text='Add', command=self.on_add).pack(side=tk.RIGHT)
+            ttk.Button(frame, text="Active", bootstyle="success",
+                       command=lambda: kwargs.get("set_active")(kwargs.get("item_id"))).pack(side=tk.RIGHT)
+            ttk.Button(frame, text='Rename', command=self.on_rename, bootstyle="secondary").pack(side=tk.RIGHT)
+        ttk.Button(frame, text='Add', command=self.on_add, bootstyle="info").pack(side=tk.RIGHT)
         frame.pack(fill=tk.X)
         self.treeview = ttk.Treeview(self.root, show='headings', columns=("name", "value", "action"))
         self.treeview.heading("#1", text="Name", anchor="center")

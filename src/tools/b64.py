@@ -14,10 +14,10 @@ class Base64GUI:
         self.input_box.pack(fill="both", expand=True)
         input_frame.pack(fill="both", expand=True)
 
-        bframe = tk.Frame(self.root)
-        ebtn = ttk.Button(bframe, text="Encrypt", command=self.encrypto)
+        bframe = ttk.Frame(self.root)
+        ebtn = ttk.Button(bframe, text="Encrypt", command=self.encrypto, bootstyle="primary")
         ebtn.pack(side=tk.LEFT)
-        dbtn = ttk.Button(bframe, text="Decrypt", command=self.decrypto)
+        dbtn = ttk.Button(bframe, text="Decrypt", command=self.decrypto, bootstyle="secondary")
         dbtn.pack(side=tk.LEFT)
         bframe.pack()
 

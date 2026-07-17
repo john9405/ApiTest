@@ -48,9 +48,9 @@ class AesGui:
         label1.pack(fill='both', expand=True, pady=(0, 3))
         frame1.pack(fill='x')
         # 创建加密和解密按钮
-        encrypt_button = ttk.Button(frame1, text="Encrypt", command=self.encrypt)
+        encrypt_button = ttk.Button(frame1, text="Encrypt", command=self.encrypt, bootstyle="primary")
         encrypt_button.grid(row=5, column=1, sticky='e', pady=(3, 0))
-        decrypt_button = ttk.Button(frame1, text="Decrypt", command=self.decrypt)
+        decrypt_button = ttk.Button(frame1, text="Decrypt", command=self.decrypt, bootstyle="secondary")
         decrypt_button.grid(row=5, column=3, sticky='w')
         # 创建输出框和标签
         label6 = ttk.LabelFrame(self.root, text="Output:")

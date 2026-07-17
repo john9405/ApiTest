@@ -27,7 +27,7 @@ class RegexWindow:
         multi_line_checkbox = ttk.Checkbutton(options_frame, text="Multiline", variable=multi_line_var)
         multi_line_checkbox.pack(side=tk.LEFT)
         # 创建查找按钮
-        find_button = ttk.Button(options_frame, text="Search",
+        find_button = ttk.Button(options_frame, text="Search", bootstyle="primary",
                                  command=lambda: self.find_matches(ignore_case_var, multi_line_var))
         find_button.pack(side=tk.LEFT)
 
