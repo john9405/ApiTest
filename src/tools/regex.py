@@ -75,7 +75,7 @@ class CommonlyUsed:
         self.root.pack(fill='both', expand=True)
 
         st = ScrolledText(self.root, spacing3=5)
-        st.insert("1.0", """常用正则表达式
+        st.insert("1.0", r"""常用正则表达式
 一、校验数字的表达式
 数字：^[0-9]*$
 n位的数字：^\d{n}$
