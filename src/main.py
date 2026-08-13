@@ -682,19 +682,19 @@ class MainWindow:
 
         panel_window.pack(fill="both", expand=True)
 
-        tb.Button(toolbar, text="📝", bootstyle="link",
+        ttk.Button(toolbar, text="📝", bootstyle="link",
                    command=self.new_request).pack(side=tk.LEFT, padx=2)
-        tb.Button(toolbar, text="📁", bootstyle="link",
+        ttk.Button(toolbar, text="📁", bootstyle="link",
                    command=self.col_win.new_proj).pack(side=tk.LEFT, padx=2)
         ttk.Separator(toolbar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=4)
-        tb.Button(toolbar, text="📥", bootstyle="link",
+        ttk.Button(toolbar, text="📥", bootstyle="link",
                    command=self.col_win.open_proj).pack(side=tk.LEFT, padx=2)
-        tb.Button(toolbar, text="📤", bootstyle="link",
+        ttk.Button(toolbar, text="📤", bootstyle="link",
                    command=self.col_win.export_proj).pack(side=tk.LEFT, padx=2)
         ttk.Separator(toolbar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=4)
-        tb.Button(toolbar, text="❓", bootstyle="link",
+        ttk.Button(toolbar, text="❓", bootstyle="link",
                    command=lambda: self.new_tab(HelpWindow, "Help")).pack(side=tk.LEFT, padx=2)
-        tb.Button(toolbar, text="ℹ️", bootstyle="link",
+        ttk.Button(toolbar, text="ℹ️", bootstyle="link",
                    command=lambda: self.new_tab(AboutWindow, "About")).pack(side=tk.LEFT, padx=2)
 
         self.on_start()
@@ -710,7 +710,7 @@ class MainWindow:
         row = col = 0
         max_cols = 2
         for entry in self.tool_entries:
-            btn = tb.Button(
+            btn = ttk.Button(
                 tools_inner, text=entry["label"], bootstyle="outline-secondary",
                 command=lambda ui=entry["ui"], text=entry["text"]: self.new_tab(ui, text),
             )
