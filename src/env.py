@@ -1,6 +1,7 @@
 import platform
 import tkinter as tk
-from tkinter import ttk, simpledialog, messagebox
+from tkinter import  simpledialog, messagebox
+import ttkbootstrap as ttk
 
 from .dao.crud import *
 

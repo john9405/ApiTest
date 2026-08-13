@@ -11,7 +11,7 @@ import re
 import threading
 import time
 import tkinter as tk
-from tkinter import ttk
+import ttkbootstrap as ttk
 from tkinter.scrolledtext import ScrolledText
 
 import requests

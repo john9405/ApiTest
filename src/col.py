@@ -3,7 +3,8 @@ import os
 import tkinter as tk
 import platform
 import threading
-from tkinter import ttk, filedialog, messagebox, simpledialog
+from tkinter import  filedialog, messagebox, simpledialog
+import ttkbootstrap as ttk
 from tkinter.scrolledtext import ScrolledText
 
 from .dao.crud import (

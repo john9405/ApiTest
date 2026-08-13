@@ -5,7 +5,8 @@ Double-click a flow to open it in the FlowEditor tab.
 
 import platform
 import tkinter as tk
-from tkinter import ttk, messagebox, simpledialog
+from tkinter import  messagebox, simpledialog
+import ttkbootstrap as ttk
 
 from .model import FlowModel
 

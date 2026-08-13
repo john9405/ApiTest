@@ -1,7 +1,7 @@
 """Flow Inspector — right-side properties panel for editing selected nodes."""
 
 import tkinter as tk
-from tkinter import ttk
+import ttkbootstrap as ttk
 
 from .nodes import NODE_REGISTRY
 

@@ -2,9 +2,7 @@ import threading
 import tkinter as tk
 import uuid
 from tkinter import font as tkfont
-from tkinter import ttk
-
-import ttkbootstrap as tb
+import ttkbootstrap as ttk
 
 from .his import HistoryWindow
 from .req import RequestWindow
@@ -599,7 +597,8 @@ class MainWindow:
 
     def __init__(self):
         # ---- ttkbootstrap-themed root window ----
-        self.root = tb.Window(themename="litera")
+        app = ttk.App(themename="litera")
+        self.root = app
         self.root.title("HTTP Client")
         self.root.geometry("1280x720")
 
@@ -635,7 +634,7 @@ class MainWindow:
         content_frame = ttk.Frame(main_frame)
         content_frame.pack(fill=tk.BOTH, expand=True)
 
-        panel_window = ttk.PanedWindow(content_frame, orient=tk.HORIZONTAL)
+        panel_window = ttk.Panedwindow(content_frame, orient=tk.HORIZONTAL)
 
         # ==================================================================
         # Left sidebar — scrollable, 5 collapsible sections

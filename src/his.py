@@ -2,7 +2,7 @@ import os
 import json
 import platform
 import tkinter as tk
-from tkinter import ttk
+import ttkbootstrap as ttk
 
 from . import WORK_DIR
 from .dao.crud import list_history, create_history, delete_history, retrieve_history, delete_all_history

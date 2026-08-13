@@ -8,7 +8,8 @@ import re
 import sys
 import tkinter as tk
 import tokenize
-from tkinter import ttk, messagebox
+from tkinter import  messagebox
+import ttkbootstrap as ttk
 from tkinter.scrolledtext import ScrolledText
 from typing import Optional
 

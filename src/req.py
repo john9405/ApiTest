@@ -3,7 +3,8 @@ import os
 import platform
 import threading
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk, simpledialog
+from tkinter import filedialog, messagebox, simpledialog
+import ttkbootstrap as ttk
 from tkinter.scrolledtext import ScrolledText
 import time
 import re
@@ -501,7 +502,7 @@ class RequestWindow:
         url_box.pack(fill=tk.BOTH, pady=3)
 
         # Create a PanedWindow
-        paned_window = ttk.PanedWindow(window, orient=tk.VERTICAL)
+        paned_window = ttk.Panedwindow(window, orient=tk.VERTICAL)
         paned_window.pack(fill=tk.BOTH, expand=tk.YES)
 
         # Create notebook

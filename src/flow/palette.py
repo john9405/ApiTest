@@ -1,7 +1,7 @@
 """Node Palette — side panel with click-to-stamp node creation."""
 
 import tkinter as tk
-from tkinter import ttk
+import ttkbootstrap as ttk
 
 from .nodes import PALETTE_ENTRIES
 

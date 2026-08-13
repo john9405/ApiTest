@@ -8,7 +8,8 @@ Contains:
 import json
 import math
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import  messagebox
+import ttkbootstrap as ttk
 from tkinter.scrolledtext import ScrolledText
 
 from .model import FlowModel
