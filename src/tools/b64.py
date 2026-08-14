@@ -1,7 +1,8 @@
 import base64
 import tkinter as tk
-from tkinter import messagebox, ttk
+from tkinter import messagebox
 from tkinter.scrolledtext import ScrolledText
+import ttkbootstrap as ttk
 
 
 class Base64GUI:
