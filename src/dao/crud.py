@@ -165,6 +165,10 @@ def retrieve_request(**kwargs):
     cur.execute('SELECT id,name,pre_script,post_script,params,headers,body,auth,method,url FROM request where id=?', (kwargs['id'],))
     data = cur.fetchone()
     con.close()
+    if data is None:
+        # Missing rows used to reach ``data[0]`` and raise a bare TypeError,
+        # which callers could not tell apart from a genuine failure.
+        return None
     return {'id': data[0],
             'name': data[1],
             'pre_script': data[2],

@@ -1,12 +1,12 @@
-from tkinter.scrolledtext import ScrolledText
+from PyQt5.QtWidgets import QPlainTextEdit
 
 
 class HelpWindow:
     """帮助窗口"""
 
     def __init__(self, master=None):
-        label = ScrolledText(master)
-        label.insert('1.0', """
+        self.root = QPlainTextEdit(master)
+        self.root.setPlainText("""
 Print logs can be used
 ```
 console.log("content")
@@ -27,7 +27,7 @@ Pre-request Script
 Retrieve request data
 req["body"]    ::dict  'Request Body'
 req["headers"] ::dict  'Request header'
-req["url"]     ::dict  'Request url'
+req["url"]     ::str   'Request url'
 
 Example of Assignment Usage: req['body']['username'] = 'x'
 ```
@@ -43,5 +43,4 @@ The URL needs to include "http" or "https".
 The Request created by clicking "New Request" will be saved to the currently selected folder.
 Where there is a "Save" button, click the Save button, otherwise the program will not save the data.
 """)
-        label.configure(state='disabled')
-        label.pack(fill='both', expand=True)
+        self.root.setReadOnly(True)

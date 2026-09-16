@@ -1,12 +1,22 @@
 import json
 import os
-import tkinter as tk
-import platform
 import threading
-from tkinter import  filedialog, messagebox, simpledialog
-import ttkbootstrap as ttk
-from tkinter.scrolledtext import ScrolledText
 
+from PyQt5.QtCore import QPoint
+from PyQt5.QtWidgets import (
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QTabWidget,
+    QPlainTextEdit,
+)
+
+from . import qui
+from .qui import TreeView, END, ask_string, ask_yes_no, show_error, open_file, save_file
+from .theme import style_role
+from .utils import CodeEditor
 from .dao.crud import (
     create_folder,
     create_variable,
@@ -26,7 +36,6 @@ from .dao.crud import (
     list_request,
     list_folder,
 )
-from .utils import CodeEditor
 
 
 class CollectionWindow:
@@ -36,27 +45,31 @@ class CollectionWindow:
         self.window = window
         self.callback = callback
 
-        self.tree = ttk.Treeview(window)
-        scroll_y = ttk.Scrollbar(window, command=self.tree.yview)
-        self.tree.heading("#0", text="Name(+)")
+        self.root = TreeView(window)
+        self.tree = self.root
+
+        # action toolbar: create collections via a button (no heading click)
+        bar = self.root.add_toolbar(34)
+        bl = QHBoxLayout(bar)
+        bl.setContentsMargins(4, 2, 4, 2)
+        add_btn = QPushButton("+ Add", bar)
+        style_role(add_btn, "primary")
+        add_btn.clicked.connect(self.new_proj)
+        bl.addWidget(add_btn)
+        bl.addStretch(1)
+
+        self.tree.heading("#0", text="Name")
         self.tree.column("#0", width=100)
-        scroll_y.pack(side="right", fill="y")
-        self.tree.pack(fill="both", expand=True)
-        self.tree.bind("<Button-1>", self.on_click)
         self.tree.bind("<Double-1>", self.on_select)
-        if platform.system() == "Darwin":
-            self.tree.bind("<Control-Button-1>", self.on_right_click)
-            self.tree.bind("<Button-2>", self.on_right_click)
-        else:
-            self.tree.bind("<Button-3>", self.on_right_click)
-        self.tree.config(yscrollcommand=scroll_y.set)
+        self.tree.bind("<Button-3>", self.on_right_click)
 
     def open_proj(self):
         """open a program"""
-        filepath = filedialog.askopenfilename(
-            filetypes=(("Json files", "*.json"),),
+        filepath = open_file(
+            self.window,
+            "Open",
+            [("Json files", "*.json")],
             initialdir=os.path.expanduser("~"),
-            parent=self.window,
         )
         if filepath:
             with open(filepath, "r", encoding="utf-8") as f:
@@ -64,7 +77,7 @@ class CollectionWindow:
                     data = json.loads(f.read())
                     self.show_proj(data)
                 except json.JSONDecodeError:
-                    messagebox.showerror("Error", "The text content must be a json")
+                    show_error(self.window, "Error", "The text content must be a json")
 
     def show_proj(self, data):
         item = None
@@ -80,7 +93,7 @@ class CollectionWindow:
         )
         node = self.tree.insert(
             "",
-            tk.END,
+            END,
             text=data["name"],
             values=[data_id, "project"],
             open=False,
@@ -110,7 +123,7 @@ class CollectionWindow:
                 )
                 cnode = self.tree.insert(
                     node,
-                    tk.END,
+                    END,
                     text=item["name"],
                     values=[data_id, "folder"],
                     open=False,
@@ -132,22 +145,26 @@ class CollectionWindow:
                 )
                 self.tree.insert(
                     node,
-                    tk.END,
+                    END,
                     text=item.get("method", "GET") + " " + item["name"],
                     values=[data_id, "request"],
                 )
 
     def export_proj(self):
         """save program"""
+        if len(self.tree.selection()) <= 0:
+            show_error(self.window, "Error", "Please select a collection first.")
+            return
         item = self.tree.item(self.tree.selection()[0])
         bean = retrieve_folder(id=item["values"][0])
 
-        filepath = filedialog.asksaveasfilename(
-            defaultextension=".json",
-            filetypes=[("json files", "*.json")],
+        filepath = save_file(
+            self.window,
+            "Save",
+            [("json files", "*.json")],
             initialdir=os.path.expanduser("~"),
             initialfile=bean["name"] + ".json",
-            parent=self.window,
+            defaultextension=".json",
         )
         if filepath:
             with open(filepath, "w", encoding="utf-8") as file:
@@ -166,13 +183,12 @@ class CollectionWindow:
                 value.update({"item": self.traverse_children(child)})
             else:
                 value = retrieve_request(id=bean["values"][0])
+                if value is None:
+                    # Row vanished from the database (deleted elsewhere);
+                    # exporting a null entry would corrupt the JSON.
+                    continue
             long_bean.append(value)
         return long_bean
-
-    def on_click(self, event):
-        region = self.tree.identify("region", event.x, event.y)
-        if region == "heading":
-            self.new_proj()
 
     def on_select(self, event):
         if event is not None:
@@ -190,11 +206,13 @@ class CollectionWindow:
             elif ctag == "request":
                 values = retrieve_request(id=item["values"][0])
                 path = self.get_path(item_id)
-
             elif ctag == "project":
                 values = retrieve_folder(id=item["values"][0])
                 path = ""
             else:
+                return
+            if values is None:
+                # The underlying row is gone; there is nothing to open.
                 return
             self.callback(
                 data=values,
@@ -226,55 +244,43 @@ class CollectionWindow:
         if item:
             self.tree.selection_set(item)
             tag = self.tree.item(item)["values"][1]
-            menu = tk.Menu(self.window, tearoff=0)
+            menu = qui.make_menu(self.window)
             if tag == "project":
-                menu.add_command(label="Open", command=self.on_open)
-                menu.add_command(
-                    label="Paste",
-                    command=self.on_paste,
-                    state="disabled" if self.cut_board is None else "normal",
-                )
-                menu.add_command(label="Add folder", command=self.new_col)
-                menu.add_command(label="Add request", command=self.new_req)
-                menu.add_command(label="Export", command=self.export_proj)
-                menu.add_command(label="Delete", command=self.delete_item)
+                menu.addAction("Open", self.on_open)
+                menu.addAction("Paste", self.on_paste).setEnabled(self.cut_board is not None)
+                menu.addAction("Add folder", self.new_col)
+                menu.addAction("Add request", self.new_req)
+                menu.addAction("Export", self.export_proj)
+                menu.addAction("Delete", self.delete_item)
             elif tag == "folder":
-                menu.add_command(label="Open", command=self.on_open)
-                menu.add_command(label="Copy", command=self.on_copy)
-                menu.add_command(label="Cut", command=self.on_cut)
-                menu.add_command(
-                    label="Paste",
-                    command=self.on_paste,
-                    state="disabled" if self.cut_board is None else "normal",
-                )
-                menu.add_command(label="Add folder", command=self.new_col)
-                menu.add_command(label="Add request", command=self.new_req)
-                menu.add_command(label="Delete", command=self.delete_item)
+                menu.addAction("Open", self.on_open)
+                menu.addAction("Copy", self.on_copy)
+                menu.addAction("Cut", self.on_cut)
+                menu.addAction("Paste", self.on_paste).setEnabled(self.cut_board is not None)
+                menu.addAction("Add folder", self.new_col)
+                menu.addAction("Add request", self.new_req)
+                menu.addAction("Delete", self.delete_item)
             elif tag == "request":
-                menu.add_command(label="Open", command=self.on_open)
-                menu.add_command(label="Copy", command=self.on_copy)
-                menu.add_command(label="Cut", command=self.on_cut)
-                menu.add_command(label="Delete", command=self.delete_item)
-            menu.post(event.x_root, event.y_root)
+                menu.addAction("Open", self.on_open)
+                menu.addAction("Copy", self.on_copy)
+                menu.addAction("Cut", self.on_cut)
+                menu.addAction("Delete", self.delete_item)
+            menu.exec_(QPoint(event.x_root, event.y_root))
 
     def new_proj(self):
-        name = simpledialog.askstring(
-            "New Collection", "Name:", initialvalue="New Collection", parent=self.window
-        )
+        name = ask_string(self.window, "New Collection", "Name:", "New Collection")
         if name is None:
             return
-        inserted_id = create_collection(name=name if name > "" else "New Collection")
+        inserted_id = create_collection(name=name if name else "New Collection")
         self.tree.insert(
             "",
-            tk.END,
-            text=name if name > "" else "New Collection",
+            END,
+            text=name if name else "New Collection",
             values=[inserted_id, "project"],
         )
 
     def new_col(self):
-        name = simpledialog.askstring(
-            "New Folder", "Name:", initialvalue="New Folder", parent=self.window
-        )
+        name = ask_string(self.window, "New Folder", "Name:", "New Folder")
         if name is None:
             return
         try:
@@ -284,31 +290,29 @@ class CollectionWindow:
             else:
                 selected_node = self.tree.parent(self.tree.selection()[0])
             inserted_id = create_folder(
-                name=name if name > "" else "New Folder",
+                name=name if name else "New Folder",
                 parent_id=self.tree.item(selected_node)["values"][0],
             )
             self.tree.insert(
                 selected_node,
-                tk.END,
-                text=name if name > "" else "New Folder",
+                END,
+                text=name if name else "New Folder",
                 values=[inserted_id, "folder"],
             )
         except IndexError:
             inserted_id = create_folder(
-                name=name if name > "" else "New Collection", parent_id=0
+                name=name if name else "New Collection", parent_id=0
             )
             self.tree.insert(
                 "",
-                tk.END,
-                text=name if name > "" else "New Collection",
+                END,
+                text=name if name else "New Collection",
                 values=[inserted_id, "project"],
             )
 
     def new_req(self, data=None):
         if data is None:
-            name = simpledialog.askstring(
-                "New Request", "Name:", initialvalue="New Request", parent=self.window
-            )
+            name = ask_string(self.window, "New Request", "Name:", "New Request")
             if name is None:
                 return
 
@@ -320,27 +324,27 @@ class CollectionWindow:
                     selected_node = self.tree.parent(self.tree.selection()[0])
 
                 inserted_id = create_request(
-                    name=name if name > "" else "New Request",
+                    name=name if name else "New Request",
                     folder_id=self.tree.item(selected_node)["values"][0],
                 )
                 x = self.tree.insert(
                     selected_node,
-                    tk.END,
-                    text="GET " + name if name > "" else "New Request",
+                    END,
+                    text="GET " + name if name else "New Request",
                     values=[inserted_id, "request"],
                 )
                 return x
             except IndexError:
-                messagebox.showerror("Error", "Save error, please select folder.")
+                show_error(self.window, "Error", "Save error, please select folder.")
 
     def save_item(self, item_id, data):
         if item_id is None:
             if len(self.tree.selection()) > 0:
+                selected = self.tree.selection()[0]
                 selected_node = (
-                    self.tree.selection()[0]
-                    if self.tree.item(self.tree.selection()[0])["values"][1]
-                    in ("folder", "project")
-                    else self.tree.parent(self.tree.selection()[0])
+                    selected
+                    if self.tree.item(selected)["values"][1] in ("folder", "project")
+                    else self.tree.parent(selected)
                 )
                 inserted_id = create_request(
                     name=data["name"],
@@ -356,13 +360,13 @@ class CollectionWindow:
                 )
                 item_id = self.tree.insert(
                     selected_node,
-                    tk.END,
+                    END,
                     text=data["method"] + " " + data["name"],
                     values=[inserted_id, "request"],
                 )
                 return item_id, inserted_id
             else:
-                messagebox.showerror("Error", "Save error, please select folder.")
+                show_error(self.window, "Error", "Save error, please select folder.")
                 return None, None
 
         self.tree.item(item_id, text=data["name"])
@@ -370,9 +374,7 @@ class CollectionWindow:
         return item_id
 
     def delete_item(self):
-        if messagebox.askyesno(
-            "Confirm", "Are you sure to delete the selected target?"
-        ):
+        if ask_yes_no(self.window, "Confirm", "Are you sure to delete the selected target?"):
             selected_nodes = self.tree.selection()
             if len(selected_nodes) > 0:
                 for selected_node in selected_nodes:
@@ -418,6 +420,8 @@ class CollectionWindow:
             if self.cut_board["action"] == "copy":
                 if source_item["values"][1] == "request":
                     data = retrieve_request(id=source_item["values"][0])
+                    if data is None:
+                        return
                     data_id = create_request(
                         name=data["name"],
                         method=data["method"],
@@ -432,7 +436,7 @@ class CollectionWindow:
                     )
                     self.tree.insert(
                         selected_node[0],
-                        tk.END,
+                        END,
                         text=data["method"] + " " + data["name"],
                         values=[data_id, "request"],
                     )
@@ -448,7 +452,7 @@ class CollectionWindow:
                     )
                     item_id = self.tree.insert(
                         selected_node[0],
-                        tk.END,
+                        END,
                         text=data["name"],
                         values=[data_id, "folder"],
                     )
@@ -460,7 +464,7 @@ class CollectionWindow:
                     )
                     self.tree.insert(
                         selected_node[0],
-                        tk.END,
+                        END,
                         text=source_item["text"],
                         values=source_item["values"],
                     )
@@ -470,7 +474,7 @@ class CollectionWindow:
                     )
                     item_id = self.tree.insert(
                         selected_node[0],
-                        tk.END,
+                        END,
                         text=source_item["text"],
                         values=source_item["values"],
                     )
@@ -493,13 +497,15 @@ class CollectionWindow:
                 )
                 new_id = self.tree.insert(
                     target_item_id,
-                    tk.END,
+                    END,
                     text=item["text"],
                     values=[data_id, "folder"],
                 )
                 self.copy_child(child, new_id)
             else:
                 data = retrieve_request(id=item["values"][0])
+                if data is None:
+                    continue
                 data_id = create_request(
                     name=data["name"],
                     method=data["method"],
@@ -514,7 +520,7 @@ class CollectionWindow:
                 )
                 self.tree.insert(
                     target_item_id,
-                    tk.END,
+                    END,
                     text=item["text"],
                     values=[data_id, "request"],
                 )
@@ -525,59 +531,42 @@ class CollectionWindow:
             item = self.tree.item(child)
             if item["values"][1] == "folder":
                 new_id = self.tree.insert(
-                    target_item_id, tk.END, text=item["text"], values=item["values"]
+                    target_item_id, END, text=item["text"], values=item["values"]
                 )
                 self.cut_child(child, new_id)
             else:
                 self.tree.insert(
-                    target_item_id, tk.END, text=item["text"], values=item["values"]
+                    target_item_id, END, text=item["text"], values=item["values"]
                 )
 
-    def on_start_child(self, data_id, item_id):
-        data = list_folder(parent_id=data_id)
-        for folder in data:
-            new_id = self.tree.insert(
-                item_id, tk.END, text=folder["name"], values=[folder["id"], "folder"]
-            )
-            thread = threading.Thread(
-                target=self.on_start_child,
-                args=(
-                    folder["id"],
-                    new_id,
-                ),
-            )
-            thread.start()
-        data = list_request(folder_id=data_id)
-        for request in data:
-            self.tree.insert(
-                item_id,
-                tk.END,
-                text=request["method"] + " " + request["name"],
-                values=[request["id"], "request"],
-            )
-
     def on_start(self):
-        """Read data from the workspace"""
-        self.tree.delete(*self.tree.get_children())
-        data = list_collection()
-        for coll in data:
-            new_id = self.tree.insert(
-                "",
-                tk.END,
-                text=coll["name"],
-                values=(
-                    coll["id"],
-                    "project",
-                ),
+        """Read data from the workspace (in a worker thread, applied on UI thread)."""
+        def worker():
+            roots = []
+            for coll in list_collection():
+                node = {"id": coll["id"], "name": coll["name"], "kind": "project", "children": []}
+                self._load_children(coll["id"], node["children"])
+                roots.append(node)
+            self.root.after(0, lambda: self._insert_nodes(roots, ""))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _load_children(self, folder_id, out):
+        for folder in list_folder(parent_id=folder_id):
+            child = {"id": folder["id"], "name": folder["name"], "kind": "folder", "children": []}
+            self._load_children(folder["id"], child["children"])
+            out.append(child)
+        for req in list_request(folder_id=folder_id):
+            out.append({"id": req["id"], "name": req["method"] + " " + req["name"], "kind": "request"})
+
+    def _insert_nodes(self, nodes, parent):
+        for node in nodes:
+            item = self.tree.insert(
+                parent, END, text=node["name"],
+                values=[node["id"], node["kind"]], open=False,
             )
-            thread = threading.Thread(
-                target=self.on_start_child,
-                args=(
-                    coll["id"],
-                    new_id,
-                ),
-            )
-            thread.start()
+            # request nodes have no children
+            self._insert_nodes(node.get("children", []), item)
 
     def on_close(self):
         """auto save"""
@@ -600,16 +589,26 @@ class CollectionWindow:
         return []
 
     def get_variable(self, item_id, name):
-        if self.tree.parent(item_id):
-            item = self.tree.item(self.tree.parent(item_id))
-            if item["values"][1] == "project":
-                return retrieve_folder_variable(folder_id=item["values"][0], name=name).strip()
-            return self.get_variable(self.tree.parent(item_id), name).strip()
+        """Look up a collection variable.
+
+        Returns the value, or None when the name is not defined anywhere in the
+        chain.  The previous version called ``.strip()`` on the result of a
+        lookup that legitimately returns None (and on the None produced by
+        running off the top of the tree), so any ``{{var}}`` that was not
+        defined crashed request execution with an AttributeError.
+        """
+        if not self.tree.parent(item_id):
+            return None
+        item = self.tree.item(self.tree.parent(item_id))
+        if item["values"][1] == "project":
+            value = retrieve_folder_variable(folder_id=item["values"][0], name=name)
+            return value.strip() if value is not None else None
+        value = self.get_variable(self.tree.parent(item_id), name)
+        return value.strip() if value is not None else None
 
 
 class ProjectWindow:
     item_id = None
-    delete_list = []
 
     def __init__(self, **kwargs) -> None:
         self.root = kwargs.get("master")
@@ -618,89 +617,126 @@ class ProjectWindow:
         data = kwargs.get("data")
         self.data_id = data["id"]
         self.data_name = data["name"]
-        self.filepath = tk.StringVar(value=self.data_name)
+        self.filepath = self.data_name
+        # Deletions are pending until Save.  This must be per-window: as a class
+        # attribute the list was shared by every collection tab, so saving one
+        # tab replayed another tab's deletions.
+        self.delete_list = []
 
-        frame = ttk.Frame(self.root)
-        frame.pack(fill=tk.X)
-        ttk.Label(frame, textvariable=self.filepath).pack(side=tk.LEFT)
-        save_btn = ttk.Button(frame, text="Save", command=self.on_save, bootstyle="primary")
-        save_btn.pack(side=tk.RIGHT)
-        ttk.Button(frame, text="Rename", command=self.on_rename, bootstyle="secondary").pack(side=tk.RIGHT)
+        layout = QVBoxLayout(self.root)
+        layout.setContentsMargins(4, 4, 4, 4)
 
-        notebook = ttk.Notebook(self.root)
-        self.overview = ScrolledText(notebook)
-        self.overview.insert(tk.END, data.get("description", ""))
-        notebook.add(self.overview, text="Overview")
+        bar = QWidget(self.root)
+        blay = QHBoxLayout(bar)
+        blay.setContentsMargins(0, 0, 0, 0)
+        self.path_label = QLabel(self.filepath, bar)
+        blay.addWidget(self.path_label)
+        blay.addStretch(1)
+
+        rename_btn = QPushButton("Rename", bar)
+        style_role(rename_btn, "secondary")
+        rename_btn.clicked.connect(self.on_rename)
+        blay.addWidget(rename_btn)
+
+        save_btn = QPushButton("Save", bar)
+        style_role(save_btn, "primary")
+        save_btn.clicked.connect(self.on_save)
+        blay.addWidget(save_btn)
+        layout.addWidget(bar)
+
+        notebook = QTabWidget(self.root)
+        self.overview = QPlainTextEdit(notebook)
+        self.overview.setPlainText(data.get("description", ""))
+        notebook.addTab(self.overview, "Overview")
         # pre-request script
         self.script_box = CodeEditor(notebook)
-        self.script_box.insert(tk.END, data.get("pre_script", ""))
-        notebook.add(self.script_box, text="Pre-request Script")
+        self.script_box.setPlainText(data.get("pre_script", ""))
+        notebook.addTab(self.script_box, "Pre-request Script")
 
         # tests
         self.tests_box = CodeEditor(notebook)
-        self.tests_box.insert(tk.END, data.get("post_script", ""))
-        notebook.add(self.tests_box, text="Post-response Script")
+        self.tests_box.setPlainText(data.get("post_script", ""))
+        notebook.addTab(self.tests_box, "Post-response Script")
 
-        variable_frame = ttk.Frame(notebook)
-        self.treeview = ttk.Treeview(
-            variable_frame, columns=("name", "value", "actions"), show="headings"
-        )
-        self.treeview.heading("#1", text="Name(+)")
+        variable_frame = QWidget(notebook)
+        vlay = QVBoxLayout(variable_frame)
+        vlay.setContentsMargins(0, 0, 0, 0)
+        vlay.setSpacing(0)
+
+        # action toolbar: add variables via a button (no heading click)
+        var_bar = QWidget(variable_frame)
+        vbl = QHBoxLayout(var_bar)
+        vbl.setContentsMargins(4, 2, 4, 2)
+        vbl.addStretch(1)
+        var_add_btn = QPushButton("+ Add", var_bar)
+        style_role(var_add_btn, "primary")
+        var_add_btn.clicked.connect(self.var_on_add)
+        vbl.addWidget(var_add_btn)
+        vlay.addWidget(var_bar)
+
+        self.treeview = TreeView(variable_frame, show="headings", columns=("name", "value", "actions"))
+        self.treeview.heading("#1", text="Name")
         self.treeview.heading("#2", text="Value")
         self.treeview.heading("#3", text="Actions")
         self.treeview.column("#1", width=100)
         self.treeview.column("#2", width=200)
-        self.treeview.column("#3", width=1)
+        self.treeview.column("#3", width=10)
         self.treeview.bind("<Button-1>", self.var_on_click)
         self.treeview.bind("<Double-1>", self.var_double_click)
-        scrollbar = ttk.Scrollbar(variable_frame, command=self.treeview.yview)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        self.treeview.pack(fill=tk.BOTH, expand=tk.YES)
-        notebook.add(variable_frame, text="Variable")
-        notebook.pack(expand=tk.YES, fill=tk.BOTH)
+        vlay.addWidget(self.treeview, 1)
+        notebook.addTab(variable_frame, "Variable")
+        layout.addWidget(notebook, 1)
 
         variable_list = list_variable(belong_name="folder", belong_id=self.data_id)
         for var in variable_list:
             self.treeview.insert(
                 "",
-                tk.END,
+                END,
                 text=var["id"],
                 values=[var["name"], var["content"], "Delete"],
             )
 
     def on_rename(self):
-        name = simpledialog.askstring(
-            "Rename", "New name:", initialvalue=self.data_name, parent=self.root
-        )
-        if name is not None:
-            update_folder(id=self.data_id, name=name)
-            self.filepath.set(name)
-            self.callback(item_id=self.item_id, data={"name": name})
+        name = ask_string(self.root, "Rename", "New name:", self.data_name)
+        # An empty name would make the node impossible to find in the tree, so
+        # treat it the same as cancelling.
+        if not name:
+            return
+        update_folder(id=self.data_id, name=name)
+        # Keep the stored name in sync: Save uses self.data_name, so without
+        # this the next Save wrote the pre-rename name back over the rename.
+        self.data_name = name
+        self.filepath = name
+        self.path_label.setText(name)
+        self.callback(item_id=self.item_id, data={"name": name})
 
     def on_save(self):
         name = self.data_name
-        description = self.overview.get("1.0", tk.END)
-        pre_request_script = self.script_box.get("1.0", tk.END)
-        tests = self.tests_box.get("1.0", tk.END)
+        description = self.overview.toPlainText()
+        pre_request_script = self.script_box.toPlainText()
+        tests = self.tests_box.toPlainText()
 
         description = description.rstrip("\n")
         pre_request_script = pre_request_script.rstrip("\n")
         tests = tests.rstrip("\n")
 
         if self.item_id is None:
-            messagebox.showerror("Failed", "Save failed, item id missing.")
+            show_error(self.root, "Failed", "Save failed, item id missing.")
             return
 
         items = self.treeview.get_children()
         for item_id in items:
             item = self.treeview.item(item_id)
             if item["text"] == "":
-                create_variable(
+                # Remember the new row id, otherwise the next Save sees text ""
+                # again and inserts a second copy of the same variable.
+                new_id = create_variable(
                     name=item["values"][0],
                     content=item["values"][1],
                     belong_name="folder",
                     belong_id=self.data_id,
                 )
+                self.treeview.item(item_id, text=new_id)
             else:
                 update_variable(
                     id=item["text"], name=item["values"][0], content=item["values"][1]
@@ -708,6 +744,7 @@ class ProjectWindow:
 
         for item_id in self.delete_list:
             delete_variable(id=item_id)
+        self.delete_list = []
 
         update_folder(
             id=self.data_id,
@@ -718,28 +755,22 @@ class ProjectWindow:
         )
         self.callback(item_id=self.item_id, data={"name": name})
 
+    def var_on_add(self):
+        """Add a new variable (button handler)."""
+        name = ask_string(self.treeview, "New Variable", "Name:", "key")
+        if name is not None:
+            value = ask_string(self.treeview, "New Variable", "Value:", "value")
+            if value is not None:
+                self.treeview.insert("", END, text="", values=(name, value, "Delete"))
+
     def var_on_click(self, event):
         region = self.treeview.identify("region", event.x, event.y)
         column = self.treeview.identify_column(event.x)
-        if region == "heading" and column == "#1":
-            name = simpledialog.askstring(
-                "New Variable", "Name:", initialvalue="key", parent=self.treeview
-            )
-            if name is not None:
-                value = simpledialog.askstring(
-                    "New Variable", "Value:", initialvalue="value", parent=self.treeview
-                )
-                if value is not None:
-                    self.treeview.insert(
-                        "", tk.END, text="", values=(name, value, "Delete")
-                    )
-        elif region == "cell" and column == "#3":
+        if region == "cell" and column == "#3":
             item_id = self.treeview.identify_row(event.y)
             self.treeview.selection_set(item_id)
             item = self.treeview.item(item_id)
-            if messagebox.askyesno(
-                "Confirm", "Are you sure you want to delete this variable?"
-            ):
+            if ask_yes_no(self.treeview, "Confirm", "Are you sure you want to delete this variable?"):
                 self.delete_list.append(item["text"])
                 self.treeview.delete(item_id)
 
@@ -750,27 +781,13 @@ class ProjectWindow:
             item_id = self.treeview.identify_row(event.y)
             item = self.treeview.item(item_id)
             if column == "#1":
-                name = simpledialog.askstring(
-                    "Edit Variable",
-                    "Name:",
-                    initialvalue=item["values"][0],
-                    parent=self.treeview,
-                )
+                name = ask_string(self.treeview, "Edit Variable", "Name:", item["values"][0])
                 if name is not None:
-                    self.treeview.item(
-                        item_id, values=(name, item["values"][1], "Delete")
-                    )
+                    self.treeview.item(item_id, values=(name, item["values"][1], "Delete"))
             elif column == "#2":
-                value = simpledialog.askstring(
-                    "Edit Variable",
-                    "Value:",
-                    initialvalue=item["values"][1],
-                    parent=self.treeview,
-                )
+                value = ask_string(self.treeview, "Edit Variable", "Value:", item["values"][1])
                 if value is not None:
-                    self.treeview.item(
-                        item_id, values=(item["values"][0], value, "Delete")
-                    )
+                    self.treeview.item(item_id, values=(item["values"][0], value, "Delete"))
 
 
 class FolderWindow:
@@ -786,53 +803,69 @@ class FolderWindow:
         self.data_id = data.get("id")
         self.data_path = kwargs.get("path", "Name:")
         self.data_name = data.get("name", "New Folder")
-        self.filepath = tk.StringVar(value=self.data_path + self.data_name)
+        self.filepath = self.data_path + self.data_name
 
-        frame = ttk.Frame(self.root)
-        frame.pack(fill=tk.X)
-        ttk.Label(frame, textvariable=self.filepath).pack(side=tk.LEFT)
-        save_btn = ttk.Button(frame, text="Save", command=self.on_save)
-        save_btn.pack(side=tk.RIGHT)
-        rename_btn = ttk.Button(frame, text="Rename", command=self.on_rename)
-        rename_btn.pack(side=tk.RIGHT)
+        layout = QVBoxLayout(self.root)
+        layout.setContentsMargins(4, 4, 4, 4)
 
-        notebook = ttk.Notebook(self.root)
-        self.overview = ScrolledText(notebook)
-        self.overview.insert(tk.END, data.get("description", ""))
-        notebook.add(self.overview, text="Overview")
+        bar = QWidget(self.root)
+        blay = QHBoxLayout(bar)
+        blay.setContentsMargins(0, 0, 0, 0)
+        self.path_label = QLabel(self.filepath, bar)
+        blay.addWidget(self.path_label)
+        blay.addStretch(1)
+
+        rename_btn = QPushButton("Rename", bar)
+        style_role(rename_btn, "secondary")
+        rename_btn.clicked.connect(self.on_rename)
+        blay.addWidget(rename_btn)
+
+        save_btn = QPushButton("Save", bar)
+        style_role(save_btn, "primary")
+        save_btn.clicked.connect(self.on_save)
+        blay.addWidget(save_btn)
+        layout.addWidget(bar)
+
+        notebook = QTabWidget(self.root)
+        self.overview = QPlainTextEdit(notebook)
+        self.overview.setPlainText(data.get("description", ""))
+        notebook.addTab(self.overview, "Overview")
         # pre-request script
         self.script_box = CodeEditor(notebook)
-        self.script_box.insert(tk.END, data.get("pre_script", ""))
-        notebook.add(self.script_box, text="Pre-request Script")
+        self.script_box.setPlainText(data.get("pre_script", ""))
+        notebook.addTab(self.script_box, "Pre-request Script")
 
         # tests
         self.tests_box = CodeEditor(notebook)
-        self.tests_box.insert(tk.END, data.get("post_script", ""))
-        notebook.add(self.tests_box, text="Post-response Script")
+        self.tests_box.setPlainText(data.get("post_script", ""))
+        notebook.addTab(self.tests_box, "Post-response Script")
 
-        notebook.pack(expand=tk.YES, fill=tk.BOTH)
+        layout.addWidget(notebook, 1)
 
     def on_rename(self):
-        name = simpledialog.askstring(
-            "Rename", "New name:", initialvalue=self.data_name, parent=self.root
-        )
-        if name is not None:
-            update_folder(id=self.data_id, name=name)
-            self.filepath.set(self.data_path + name)
-            self.callback(item_id=self.item_id, data={"name": name})
+        name = ask_string(self.root, "Rename", "New name:", self.data_name)
+        if not name:
+            return
+        update_folder(id=self.data_id, name=name)
+        # Save() writes self.data_name back to the database, so the rename has
+        # to be recorded here or the next Save silently undid it.
+        self.data_name = name
+        self.filepath = self.data_path + name
+        self.path_label.setText(self.filepath)
+        self.callback(item_id=self.item_id, data={"name": name})
 
     def on_save(self):
         name = self.data_name
-        description = self.overview.get("1.0", tk.END)
-        pre_request_script = self.script_box.get("1.0", tk.END)
-        tests = self.tests_box.get("1.0", tk.END)
+        description = self.overview.toPlainText()
+        pre_request_script = self.script_box.toPlainText()
+        tests = self.tests_box.toPlainText()
 
         description = description.rstrip("\n")
         pre_request_script = pre_request_script.rstrip("\n")
         tests = tests.rstrip("\n")
 
         if self.item_id is None:
-            messagebox.showerror("Failed", "Save failed, item id missing.")
+            show_error(self.root, "Failed", "Save failed, item id missing.")
             return
         update_folder(
             id=self.data_id,

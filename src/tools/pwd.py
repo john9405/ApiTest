@@ -1,64 +1,98 @@
-import tkinter as tk
-from tkinter import  messagebox
-import ttkbootstrap as ttk
 import secrets
 import string
-import re
+
+from PyQt5.QtWidgets import (
+    QWidget,
+    QGridLayout,
+    QLabel,
+    QLineEdit,
+    QSpinBox,
+    QCheckBox,
+    QPushButton,
+)
+
+from ..theme import style_role
 
 
 class GenPwdWindow:
     """ 随即密码生成器 """
+
     def __init__(self, master=None) -> None:
-        self.root = ttk.Frame(master)
-        self.root.pack(padx=5, pady=5)
-        self.dcb = tk.BooleanVar(value=True)  # 数字
-        self.lccb = tk.BooleanVar(value=True)  # 小写字母
-        self.uccb = tk.BooleanVar(value=True)  # 大写字母
-        self.pcb = tk.BooleanVar()  # 字符
-        self.l = tk.IntVar(value=8)
+        self.root = QWidget(master)
+        grid = QGridLayout(self.root)
+        grid.setContentsMargins(8, 8, 8, 8)
+        grid.setHorizontalSpacing(10)
+        grid.setVerticalSpacing(6)
 
-        vcmd = (self.root.register(lambda x: re.search(r"^\d+$", x) is not None), '%P')
-        ivcmd = (self.root.register(lambda: messagebox.showerror("Error", "The password length must be an integer")), )
-        # 密码长度标签和输入框
-        length_label = ttk.Label(self.root, text="Length:")
-        length_label.grid(row=0, column=0, sticky='w')
-        le = ttk.Spinbox(self.root, textvariable=self.l, validate='key', validatecommand=vcmd, invalidcommand=ivcmd,
-                         from_=1, to=100)
-        le.grid(row=0, column=1, columnspan=4, sticky='w')
-        # 密码复杂程度选择
-        complexity_label = ttk.Label(self.root, text="Complexity:")
-        complexity_label.grid(row=1, column=0, sticky='w')
-        ttk.Checkbutton(self.root, text="0-9", variable=self.dcb).grid(row=1, column=1)
-        ttk.Checkbutton(self.root, text="a-z", variable=self.lccb).grid(row=1, column=2)
-        ttk.Checkbutton(self.root, text="A-z", variable=self.uccb).grid(row=1, column=3)
-        ttk.Checkbutton(self.root, text="other", variable=self.pcb).grid(row=1, column=4)
+        grid.addWidget(QLabel("Length:", self.root), 0, 0)
+        self.l = QSpinBox(self.root)
+        self.l.setRange(1, 100)
+        self.l.setValue(8)
+        grid.addWidget(self.l, 0, 1, 1, 4)
 
-        # 生成密码按钮
-        generate_button = ttk.Button(self.root, text="Generate", command=self.generate_password, bootstyle="primary")
-        generate_button.grid(row=2, column=1, columnspan=4, sticky='w')
+        grid.addWidget(QLabel("Complexity:", self.root), 1, 0)
+        self.dcb = QCheckBox("0-9", self.root)
+        self.dcb.setChecked(True)
+        grid.addWidget(self.dcb, 1, 1)
+        self.lccb = QCheckBox("a-z", self.root)
+        self.lccb.setChecked(True)
+        grid.addWidget(self.lccb, 1, 2)
+        self.uccb = QCheckBox("A-Z", self.root)
+        self.uccb.setChecked(True)
+        grid.addWidget(self.uccb, 1, 3)
+        self.pcb = QCheckBox("other", self.root)
+        grid.addWidget(self.pcb, 1, 4)
 
-        # 生成密码的标签
-        password_label = ttk.Label(self.root, text="Generated:")
-        password_label.grid(row=3, column=0)
+        generate_button = QPushButton("Generate", self.root)
+        style_role(generate_button, "primary")
+        generate_button.clicked.connect(self.generate_password)
+        grid.addWidget(generate_button, 2, 1, 1, 4)
 
-        self.pwd_entry = ttk.Entry(self.root, width=24)
-        self.pwd_entry.grid(row=3, column=1, columnspan=3, sticky='w')
+        grid.addWidget(QLabel("Generated:", self.root), 3, 0)
+        self.pwd_entry = QLineEdit(self.root)
+        self.pwd_entry.setMinimumWidth(220)
+        grid.addWidget(self.pwd_entry, 3, 1, 1, 3)
 
-        # 复制密码按钮
-        copy_button = ttk.Button(self.root, text="Copy", command=self.copy_password, bootstyle="info")
-        copy_button.grid(row=3, column=4, sticky="w")
+        copy_button = QPushButton("Copy", self.root)
+        style_role(copy_button, "info")
+        copy_button.clicked.connect(self.copy_password)
+        grid.addWidget(copy_button, 3, 4)
+
+        # bottom spring: absorb the leftover height so the fields stay
+        # top-aligned and compact instead of being spread out vertically
+        grid.setRowStretch(4, 1)
 
     def generate_password(self):
-        password_length = self.l.get()
-        alphabet = string.digits if self.dcb.get() else ""
-        alphabet += string.ascii_lowercase if self.lccb.get() else ""
-        alphabet += string.ascii_uppercase if self.uccb.get() else ""
-        alphabet += string.punctuation if self.pcb.get() else ""
-        password = "".join(secrets.choice(alphabet) for _ in range(password_length)) if alphabet > "" else ""
-        self.pwd_entry.delete(0, tk.END)
-        self.pwd_entry.insert(0, password)
+        password_length = self.l.value()
+        sets = [
+            charset for charset, box in (
+                (string.digits, self.dcb),
+                (string.ascii_lowercase, self.lccb),
+                (string.ascii_uppercase, self.uccb),
+                (string.punctuation, self.pcb),
+            ) if box.isChecked()
+        ]
+        if not sets:
+            self.pwd_entry.clear()
+            return
+
+        # Seed one character from every selected class before filling the rest.
+        # Sampling the concatenated alphabet alone left ~24% of 8-character
+        # passwords without a digit even with 0-9 checked, so the result could
+        # fail a site's "must contain a digit" rule.
+        classes = sets[:password_length]
+        chars = [secrets.choice(charset) for charset in classes]
+        alphabet = "".join(sets)
+        chars += [secrets.choice(alphabet) for _ in range(password_length - len(chars))]
+        # Shuffle with a CSPRNG so the seeded characters are not always first.
+        secrets.SystemRandom().shuffle(chars)
+        self.pwd_entry.setText("".join(chars))
 
     def copy_password(self):
         """将生成的密码复制到剪贴板"""
-        self.root.clipboard_clear()
-        self.root.clipboard_append(self.pwd_entry.get())
+        QApplication_clipboard(self.pwd_entry.text())
+
+
+def QApplication_clipboard(text):
+    from PyQt5.QtWidgets import QApplication
+    QApplication.clipboard().setText(text)

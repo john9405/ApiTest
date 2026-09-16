@@ -3,64 +3,65 @@
 Double-click a flow to open it in the FlowEditor tab.
 """
 
-import platform
-import tkinter as tk
-from tkinter import  messagebox, simpledialog
-import ttkbootstrap as ttk
+from PyQt5.QtCore import QPoint
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton
 
 from .model import FlowModel
+from .. import qui
+from ..qui import TreeView, END, ask_string, ask_yes_no
+from ..theme import style_role
 
 
 class FlowWindow:
     """Sidebar panel that lists all saved flows.
 
     Follows the same pattern as EnvironmentWindow and HistoryWindow:
-    - self.root is the ttk.Frame
+    - self.root is the container widget
     - TreeView for the list
     - Callback to main.py for opening flow editor tabs
     """
 
     def __init__(self, parent, callback=None):
-        self.root = ttk.Frame(parent)
+        self.root = QWidget(parent)
         self.callback = callback
 
+        layout = QVBoxLayout(self.root)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
         # Toolbar
-        toolbar = ttk.Frame(self.root)
-        toolbar.pack(fill=tk.X, padx=2, pady=2)
-        ttk.Label(toolbar, text="Flows").pack(side=tk.LEFT)
-        add_btn = ttk.Button(toolbar, text="+", width=3, command=self.on_new)
-        add_btn.pack(side=tk.RIGHT)
+        toolbar = QWidget(self.root)
+        tl = QHBoxLayout(toolbar)
+        tl.setContentsMargins(4, 2, 4, 2)
+        tl.addWidget(QLabel("Flows", toolbar))
+        tl.addStretch(1)
+        add_btn = QPushButton("+ Add", toolbar)
+        style_role(add_btn, "primary")
+        add_btn.clicked.connect(self.on_new)
+        tl.addWidget(add_btn)
+        layout.addWidget(toolbar)
 
         # TreeView
-        self.treeview = ttk.Treeview(self.root, show="headings", columns=("name", "modified"))
-        self.treeview.heading("name", text="Name (+)")
-        self.treeview.heading("modified", text="Modified")
-        self.treeview.column("name", width=100)
-        self.treeview.column("modified", width=60)
-
-        scroll_y = ttk.Scrollbar(self.root, orient=tk.VERTICAL, command=self.treeview.yview)
-        scroll_y.pack(side=tk.RIGHT, fill=tk.Y)
-        self.treeview.pack(fill=tk.BOTH, expand=True)
-        self.treeview.config(yscrollcommand=scroll_y.set)
-
-        # Bindings
-        self.treeview.bind("<Button-1>", self.on_click)
+        self.treeview = TreeView(self.root, show="headings", columns=("name", "modified"))
+        self.treeview.heading("#1", text="Name")
+        self.treeview.heading("#2", text="Modified")
+        self.treeview.column("#1", width=100)
+        self.treeview.column("#2", width=60)
         self.treeview.bind("<Double-1>", self.on_open)
-        if platform.system() == "Darwin":
-            self.treeview.bind("<Control-Button-1>", self.on_right_click)
-            self.treeview.bind("<Button-2>", self.on_right_click)
-        else:
-            self.treeview.bind("<Button-3>", self.on_right_click)
+        self.treeview.bind("<Button-3>", self.on_right_click)
+        layout.addWidget(self.treeview, 1)
 
     def on_start(self):
         """Load flows from database on app startup."""
         flows = FlowModel.list_all()
-        for item in flows:
-            modified = item.get("modified_at", "")
-            if modified and len(modified) > 10:
-                modified = modified[:10]
-            self.treeview.insert("", tk.END, iid=str(item["id"]),
-                                 values=(item["name"], modified or ""))
+        def populate():
+            for item in flows:
+                modified = item.get("modified_at", "")
+                if modified and len(modified) > 10:
+                    modified = modified[:10]
+                self.treeview.insert("", END, iid=str(item["id"]),
+                                     values=(item["name"], modified or ""))
+        self.treeview.after(0, populate)
 
     def on_end(self):
         """Called on app close; nothing to persist here."""
@@ -68,28 +69,21 @@ class FlowWindow:
 
     def refresh(self):
         """Reload the treeview from database."""
-        self.treeview.delete(*self.treeview.get_children())
+        self.treeview.delete(self.treeview.get_children())
         self.on_start()
-
-    def on_click(self, event):
-        region = self.treeview.identify("region", event.x, event.y)
-        if region == "heading":
-            column = self.treeview.identify_column(event.x)
-            if column == "#1":
-                self.on_new()
 
     def on_open(self, event=None):
         """Open the selected flow in the editor."""
         selection = self.treeview.selection()
         if not selection:
             return
-        flow_id = int(selection[0])
+        flow_id = int(str(selection[0]))
         if self.callback:
             self.callback(action="open_flow", flow_id=flow_id)
 
     def on_new(self):
         """Create a new flow."""
-        name = simpledialog.askstring("New Flow", "Enter flow name:", parent=self.root)
+        name = ask_string(self.root, "New Flow", "Enter flow name:", "")
         if name is None:
             return
         # Create via CRUD directly
@@ -104,11 +98,10 @@ class FlowWindow:
         selection = self.treeview.selection()
         if not selection:
             return
-        flow_id = int(selection[0])
+        flow_id = int(str(selection[0]))
         item = self.treeview.item(selection[0])
         old_name = item["values"][0]
-        new_name = simpledialog.askstring("Rename Flow", "Enter new name:",
-                                          initialvalue=old_name, parent=self.root)
+        new_name = ask_string(self.root, "Rename Flow", "Enter new name:", old_name)
         if new_name and new_name != old_name:
             from ..dao.crud import update_flow
             update_flow(id=flow_id, name=new_name)
@@ -119,11 +112,10 @@ class FlowWindow:
         selection = self.treeview.selection()
         if not selection:
             return
-        flow_id = int(selection[0])
+        flow_id = int(str(selection[0]))
         item = self.treeview.item(selection[0])
         name = item["values"][0]
-        if messagebox.askyesno("Delete Flow", f'Delete flow "{name}"?',
-                               parent=self.root):
+        if ask_yes_no(self.root, "Delete Flow", f'Delete flow "{name}"?'):
             FlowModel.delete(flow_id)
             self.refresh()
 
@@ -132,16 +124,25 @@ class FlowWindow:
         selection = self.treeview.selection()
         if not selection:
             return
-        flow_id = int(selection[0])
+        flow_id = int(str(selection[0]))
         original = FlowModel.load(flow_id)
         if original is None:
             return
         original.name = f"{original.name} (copy)"
         original.id = None
-        for node in original.nodes:
-            node.id = None
+        # Nodes need fresh *temporary* ids, and the edges have to be remapped to
+        # them.  Setting every node id to None made save() key its id_map on
+        # None while the connections still held the original database ids, so
+        # Duplicate raised KeyError (and had already inserted half a copy).
+        id_map = {}
+        for index, node in enumerate(original.nodes, start=1):
+            id_map[node.id] = -index
+            node.id = -index
+        original._next_id = len(original.nodes) + 1
         for conn in original.connections:
             conn.id = None
+            conn.source_node_id = id_map.get(conn.source_node_id, conn.source_node_id)
+            conn.target_node_id = id_map.get(conn.target_node_id, conn.target_node_id)
         original.save()
         self.refresh()
 
@@ -150,13 +151,13 @@ class FlowWindow:
         item = self.treeview.identify_row(event.y)
         if item:
             self.treeview.selection_set(item)
-        menu = tk.Menu(self.root, tearoff=False)
+        menu = qui.make_menu(self.root)
         if item:
-            menu.add_command(label="Open", command=self.on_open)
-            menu.add_command(label="Rename", command=self.on_rename)
-            menu.add_command(label="Duplicate", command=self.on_duplicate)
-            menu.add_separator()
-            menu.add_command(label="Delete", command=self.on_delete)
+            menu.addAction("Open", self.on_open)
+            menu.addAction("Rename", self.on_rename)
+            menu.addAction("Duplicate", self.on_duplicate)
+            menu.addSeparator()
+            menu.addAction("Delete", self.on_delete)
         else:
-            menu.add_command(label="New Flow", command=self.on_new)
-        menu.post(event.x_root, event.y_root)
+            menu.addAction("New Flow", self.on_new)
+        menu.exec_(QPoint(event.x_root, event.y_root))

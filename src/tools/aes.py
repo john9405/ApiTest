@@ -1,99 +1,174 @@
-from tkinter import  messagebox
-import ttkbootstrap as ttk
-from tkinter.scrolledtext import ScrolledText
 import base64
+import secrets
+
+from PyQt5.QtWidgets import (
+    QWidget,
+    QVBoxLayout,
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QComboBox,
+    QPlainTextEdit,
+    QGroupBox,
+)
+
+from ..qui import show_error
+from ..theme import style_role
+from PyQt5.QtWidgets import QPushButton
 
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad, unpad
 
+# AES always has a 128-bit block; these are the *key* sizes PyCryptodome
+# accepts, and it picks the variant from the actual key length.
+KEY_SIZES = {"128": 16, "192": 24, "256": 32}
+
 
 class AesGui:
     """ aes Window """
+
     def __init__(self, master=None):
-        self.root = ttk.Frame(master)
-        self.root.pack(fill='both', expand=True, padx=5, pady=5)
+        self.root = QWidget(master)
+        outer = QVBoxLayout(self.root)
+        outer.setContentsMargins(5, 5, 5, 5)
 
-        frame1 = ttk.Frame(self.root)
-        label2 = ttk.Label(frame1, text="Key:")
-        label2.grid(row=2, column=2, sticky='w', padx=3)
-        self.entry2 = ttk.Entry(frame1)
-        self.entry2.grid(row=2, column=3, sticky='w')
+        frame1 = QWidget(self.root)
+        grid = QGridLayout(frame1)
+        grid.setContentsMargins(0, 0, 0, 0)
 
-        label7 = ttk.Label(frame1, text="IV:")
-        label7.grid(row=3, column=2, sticky='w', padx=3)
-        self.entry3 = ttk.Entry(frame1)
-        self.entry3.grid(row=3, column=3, sticky='w', pady=3)
+        grid.addWidget(QLabel("Encryption:", frame1), 0, 0)
+        self.mode_box = QComboBox(frame1)
+        self.mode_box.addItems(("ECB", "CBC"))
+        # CBC + pkcs7 works out of the box; the old ECB + nopadding default
+        # rejected ordinary text with "Data must be aligned to block boundary".
+        self.mode_box.setCurrentIndex(1)
+        self.mode_box.currentTextChanged.connect(self._on_mode_changed)
+        grid.addWidget(self.mode_box, 0, 1)
 
-        label3 = ttk.Label(frame1, text="Encryption:")
-        label3.grid(row=2, column=0, sticky='w')
-        self.mode_box = ttk.Combobox(frame1, values=("ECB", "CBC"))
-        self.mode_box.current(0)
-        self.mode_box.grid(row=2, column=1, sticky='w')
+        grid.addWidget(QLabel("Key:", frame1), 0, 2)
+        self.entry2 = QLineEdit(frame1)
+        grid.addWidget(self.entry2, 0, 3)
 
-        label4 = ttk.Label(frame1, text="Padding:")
-        label4.grid(row=3, column=0, sticky='w')
-        self.padding_box = ttk.Combobox(frame1, values=("nopadding", "pkcs7", "iso7816", "x923"))
-        self.padding_box.current(0)
-        self.padding_box.grid(row=3, column=1, sticky='w', pady=3)
+        grid.addWidget(QLabel("Padding:", frame1), 1, 0)
+        self.padding_box = QComboBox(frame1)
+        self.padding_box.addItems(("pkcs7", "nopadding", "iso7816", "x923"))
+        self.padding_box.setCurrentIndex(0)
+        grid.addWidget(self.padding_box, 1, 1)
 
-        label5 = ttk.Label(frame1, text="Block:")
-        label5.grid(row=4, column=0, sticky='w')
-        self.blocksize_box = ttk.Combobox(frame1, values=("128", "192", "256"))
-        self.blocksize_box.current(0)
-        self.blocksize_box.grid(row=4, column=1, sticky='w')
+        grid.addWidget(QLabel("IV:", frame1), 1, 2)
+        self.entry3 = QLineEdit(frame1)
+        grid.addWidget(self.entry3, 1, 3)
+        iv_btn = QPushButton("Random", frame1)
+        style_role(iv_btn, "info")
+        iv_btn.setToolTip("Fill IV with 16 random bytes (CBC only)")
+        iv_btn.clicked.connect(self._random_iv)
+        grid.addWidget(iv_btn, 1, 4)
 
-        # 创建输入框和标签
-        label1 = ttk.LabelFrame(self.root, text="Input:")
-        self.entry1 = ScrolledText(label1, width=50, height=10)
-        self.entry1.pack(fill='both', expand=True)
-        label1.pack(fill='both', expand=True, pady=(0, 3))
-        frame1.pack(fill='x')
-        # 创建加密和解密按钮
-        encrypt_button = ttk.Button(frame1, text="Encrypt", command=self.encrypt, bootstyle="primary")
-        encrypt_button.grid(row=5, column=1, sticky='e', pady=(3, 0))
-        decrypt_button = ttk.Button(frame1, text="Decrypt", command=self.decrypt, bootstyle="secondary")
-        decrypt_button.grid(row=5, column=3, sticky='w')
-        # 创建输出框和标签
-        label6 = ttk.LabelFrame(self.root, text="Output:")
-        self.text = ScrolledText(label6, width=50, height=10)
-        self.text.pack(fill='both', expand=True)
-        label6.pack(fill='both', expand=True)
+        grid.addWidget(QLabel("Key size:", frame1), 2, 0)
+        self.blocksize_box = QComboBox(frame1)
+        self.blocksize_box.addItems(tuple(KEY_SIZES))
+        self.blocksize_box.setCurrentIndex(0)
+        grid.addWidget(self.blocksize_box, 2, 1)
+
+        buttons = QHBoxLayout()
+        encrypt_button = QPushButton("Encrypt", frame1)
+        style_role(encrypt_button, "primary")
+        encrypt_button.clicked.connect(self.encrypt)
+        buttons.addWidget(encrypt_button)
+        decrypt_button = QPushButton("Decrypt", frame1)
+        style_role(decrypt_button, "secondary")
+        decrypt_button.clicked.connect(self.decrypt)
+        buttons.addWidget(decrypt_button)
+        buttons.addStretch(1)
+        grid.addLayout(buttons, 3, 1, 1, 3)
+
+        outer.addWidget(frame1)
+
+        input_group = QGroupBox("Input:", self.root)
+        in_lay = QVBoxLayout(input_group)
+        self.entry1 = QPlainTextEdit(input_group)
+        self.entry1.setMinimumHeight(120)
+        in_lay.addWidget(self.entry1)
+        outer.addWidget(input_group, 1)
+
+        output_group = QGroupBox("Output:", self.root)
+        out_lay = QVBoxLayout(output_group)
+        self.text = QPlainTextEdit(output_group)
+        self.text.setMinimumHeight(120)
+        out_lay.addWidget(self.text)
+        outer.addWidget(output_group, 1)
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+    def _on_mode_changed(self, mode):
+        """The IV is only used by CBC; make that visible."""
+        self.entry3.setEnabled(mode == "CBC")
+
+    def _random_iv(self):
+        self.entry3.setText(secrets.token_hex(8))
+
+    def _resolve_key(self):
+        """Return the key bytes for the current settings, or None (dialog shown).
+
+        The old check was `len(key) < blocksize / 8`, a lower bound on a value
+        that is really the *key* length: a 24-character key with "128" selected
+        silently ran AES-192, so the peer could not decrypt it.
+        """
+        key = self.entry2.text()
+        expected = KEY_SIZES[self.blocksize_box.currentText()]
+        key_bytes = key.encode("utf-8")
+        if len(key_bytes) not in (16, 24, 32):
+            show_error(
+                self.root, "Error",
+                f"The key must be 16, 24 or 32 characters "
+                f"({len(key_bytes)} given).",
+            )
+            return None
+        if len(key_bytes) != expected:
+            show_error(
+                self.root, "Error",
+                f"Key size {self.blocksize_box.currentText()} selected, but the "
+                f"key is {len(key_bytes) * 8} bits.",
+            )
+            return None
+        return key_bytes
+
+    def _build_cipher(self):
+        """Return an AES cipher for the current settings, or None (dialog shown)."""
+        key = self._resolve_key()
+        if key is None:
+            return None
+        mode = self.mode_box.currentText()
+        if mode == "CBC":
+            iv = self.entry3.text()
+            if len(iv.encode("utf-8")) != 16:
+                show_error(self.root, "Error", "The offset length must be 16 bits.")
+                return None
+            return AES.new(key, AES.MODE_CBC, iv=iv.encode("utf-8"))
+        return AES.new(key, AES.MODE_ECB)
+
+    @staticmethod
+    def _decode_b64(ciphertext):
+        """Decode base64, refusing input that is not really base64.
+
+        ``b64decode`` without ``validate=True`` just drops characters it does
+        not recognise, so "aGVsbG8=@@@" decoded to "hello" and typo'd or
+        truncated ciphertext silently produced a wrong plaintext.
+        """
+        compact = b"".join(ciphertext.encode("utf-8").split())
+        return base64.b64decode(compact, validate=True)
 
     # 加密函数
     def encrypt(self):
         try:
-            # 获取输入框中的明文和密钥
-            plaintext = self.entry1.get("1.0", 'end')
-            key = self.entry2.get()
-            iv = self.entry3.get()
-            mode = self.mode_box.get()
-            padding = self.padding_box.get()
-            blocksize = self.blocksize_box.get()
-            plaintext = plaintext.encode()
-            blocksize = int(blocksize)
-
-            # 将密钥填充到指定长度
-            if len(key) < blocksize / 8:
-                messagebox.showerror("Error", f"The password must contain at least {blocksize / 8} characters.")
+            plaintext = self.entry1.toPlainText().encode("utf-8")
+            padding = self.padding_box.currentText()
+            cipher = self._build_cipher()
+            if cipher is None:
                 return
 
-            key = key.encode()
-
-            # 根据选择的加密模式和填充方式创建AES对象
-            if mode == "ECB":
-                cipher = AES.new(key, AES.MODE_ECB)
-            elif mode == "CBC":
-                if len(iv) < 16:
-                    messagebox.showerror("Error", "The offset length must be 16 bits.")
-                    return
-
-                iv = iv.encode()
-                cipher = AES.new(key, AES.MODE_CBC, iv=iv)
-            else:
-                messagebox.showerror("Error", "Unsupported encryption mode.")
-                return
-
-            # 将明文填充到指定长度
             if padding == "pkcs7":
                 plaintext = pad(plaintext, AES.block_size)
             elif padding == "iso7816":
@@ -101,50 +176,21 @@ class AesGui:
             elif padding == "x923":
                 plaintext = pad(plaintext, AES.block_size, "x923")
 
-            # 加密明文并将结果转换为base64格式
-            ciphertext = cipher.encrypt(plaintext)
-            ciphertext = base64.b64encode(ciphertext).decode()
-
-            # 显示加密结果
-            self.text.delete(1.0, 'end')
-            self.text.insert('end', ciphertext)
+            ciphertext = base64.b64encode(cipher.encrypt(plaintext)).decode()
+            self.text.setPlainText(ciphertext)
         except Exception as e:
-            messagebox.showerror("error", str(e))
-            return
+            self.text.clear()
+            show_error(self.root, "error", str(e))
 
     # 解密函数
     def decrypt(self):
         try:
-            # 获取输入框中的密文和密钥
-            ciphertext = self.entry1.get("1.0", 'end')
-            ciphertext = ciphertext.encode()
-            key = self.entry2.get()
-            iv = self.entry3.get()
-            mode = self.mode_box.get()
-            padding = self.padding_box.get()
-            blocksize = self.blocksize_box.get()
-            blocksize = int(blocksize)
-
-            # 将密钥填充到指定长度
-            if len(key) < blocksize / 8:
-                messagebox.showerror("Error", f"The password must contain at least {blocksize / 8} characters.")
+            ciphertext = self._decode_b64(self.entry1.toPlainText())
+            padding = self.padding_box.currentText()
+            cipher = self._build_cipher()
+            if cipher is None:
                 return
 
-            key = key.encode()
-
-            # 根据选择的加密模式和填充方式创建AES对象
-            if mode == "ECB":
-                cipher = AES.new(key, AES.MODE_ECB)
-            elif mode == "CBC":
-                if len(iv) < 16:
-                    messagebox.showerror("Error", "The offset length must be 16 bits")
-                    return
-                cipher = AES.new(key, AES.MODE_CBC, iv=iv)
-            else:
-                messagebox.showerror("Error", "Unsupported encryption mode.")
-                return
-
-            ciphertext = base64.b64decode(ciphertext)
             plaintext = cipher.decrypt(ciphertext)
 
             if padding == "pkcs7":
@@ -154,12 +200,7 @@ class AesGui:
             elif padding == "x923":
                 plaintext = unpad(plaintext, AES.block_size, "x923")
 
-            # 解密密文并去除填充
-            plaintext = plaintext.decode()
-
-            # 显示解密结果
-            self.text.delete(1.0, 'end')
-            self.text.insert('end', plaintext)
+            self.text.setPlainText(plaintext.decode("utf-8"))
         except Exception as e:
-            messagebox.showerror("error", str(e))
-            return
+            self.text.clear()
+            show_error(self.root, "error", str(e))

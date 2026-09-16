@@ -1,0 +1,13 @@
+# Optional authentication back ends.
+#
+# Nothing in the current code base imports these: the Authorization tab offers
+# noauth / basic / digest / oauth1 only (see AuthFrame in src/req.py).  They are
+# kept separate from requirements.txt because both need native Kerberos or NTLM
+# support (gssapi, krb5, pyspnego) and are the most likely packages to fail a
+# clean `pip install` on a machine without those system libraries.
+#
+# Install only if you add Kerberos or NTLM auth:
+#     pip install -r requirements-optional.txt
+
+requests-kerberos>=0.14
+requests_ntlm>=1.2

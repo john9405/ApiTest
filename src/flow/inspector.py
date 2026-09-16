@@ -1,63 +1,73 @@
 """Flow Inspector — right-side properties panel for editing selected nodes."""
 
-import tkinter as tk
-import ttkbootstrap as ttk
+from PyQt5.QtCore import Qt
+from PyQt5.QtWidgets import (
+    QWidget,
+    QVBoxLayout,
+    QLabel,
+    QLineEdit,
+    QScrollArea,
+    QFrame,
+)
 
 from .nodes import NODE_REGISTRY
+from .. import qui
 
 
-class FlowInspector(ttk.Frame):
+class FlowInspector(QWidget):
     """Right-side panel showing properties of the currently selected node."""
 
-    INSPECTOR_WIDTH = 220
+    INSPECTOR_WIDTH = 230
 
     def __init__(self, master, on_node_change=None):
-        super().__init__(master, width=self.INSPECTOR_WIDTH)
+        super().__init__(master)
+        self.setFixedWidth(self.INSPECTOR_WIDTH)
         self.on_node_change = on_node_change
         self._current_node = None
         self._config_frame = None
-        self.pack_propagate(False)
 
-        # Header
-        header = ttk.Label(self, text="Properties", font=("TkDefaultFont", 11, "bold"))
-        header.pack(fill=tk.X, padx=4, pady=(4, 2))
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
-        ttk.Separator(self, orient=tk.HORIZONTAL).pack(fill=tk.X, padx=2)
+        header = QLabel("Properties", self)
+        header.setObjectName("SectionHeader")
+        layout.addWidget(header)
+
+        layout.addWidget(qui.hline(self))
 
         # Scrollable content area
-        self._canvas = tk.Canvas(self, borderwidth=0, highlightthickness=0)
-        self._scrollbar = ttk.Scrollbar(self, orient=tk.VERTICAL, command=self._canvas.yview)
-        self._canvas.configure(yscrollcommand=self._scrollbar.set)
-        self._scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        self._canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self._scroll = QScrollArea(self)
+        self._scroll.setWidgetResizable(True)
+        self._scroll.setFrameShape(QFrame.NoFrame)
+        layout.addWidget(self._scroll, 1)
 
-        self._content = ttk.Frame(self._canvas)
-        self._canvas_window = self._canvas.create_window((0, 0), window=self._content, anchor="nw")
+        self._content = QWidget(self._scroll)
+        self._content.setObjectName("InspectorContent")
+        self._scroll.setWidget(self._content)
+        self._content_layout = QVBoxLayout(self._content)
+        self._content_layout.setContentsMargins(4, 4, 4, 4)
+        self._content_layout.setSpacing(4)
 
-        self._content.bind("<Configure>", self._on_content_configure)
-        self._canvas.bind("<Configure>", self._on_canvas_configure)
-
-        # Default placeholder
         self._show_placeholder()
 
-    def _on_content_configure(self, _event):
-        self._canvas.configure(scrollregion=self._canvas.bbox("all"))
-
-    def _on_canvas_configure(self, event):
-        self._canvas.itemconfigure(self._canvas_window, width=event.width)
+    def _clear_content(self):
+        """Remove all widgets from the content area."""
+        while self._content_layout.count():
+            item = self._content_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+        self._config_frame = None
 
     def _show_placeholder(self):
         """Show message when no node is selected."""
         self._clear_content()
-        ttk.Label(self._content, text="Select a block\nto configure",
-                  foreground="#9ca3af", anchor="center", justify="center").pack(
-            fill=tk.X, padx=10, pady=30)
-
-    def _clear_content(self):
-        """Remove all widgets from the content area."""
-        for widget in self._content.winfo_children():
-            widget.destroy()
-        self._config_frame = None
+        label = QLabel("Select a block\nto configure", self._content)
+        label.setAlignment(Qt.AlignCenter)
+        label.setStyleSheet("color: #9ca3af; padding: 20px 4px;")
+        self._content_layout.addWidget(label)
+        self._content_layout.addStretch(1)
 
     def set_node(self, node_model):
         """Display configuration for a node."""
@@ -70,44 +80,52 @@ class FlowInspector(ttk.Frame):
 
         node_cls = NODE_REGISTRY.get(node_model.node_type)
         if node_cls is None:
-            ttk.Label(self._content, text=f"Unknown type: {node_model.node_type}",
-                      foreground="red").pack(padx=5, pady=5)
+            label = QLabel(f"Unknown type: {node_model.node_type}", self._content)
+            label.setStyleSheet("color: red;")
+            self._content_layout.addWidget(label)
             return
 
-        # Node type header
-        type_header = tk.Frame(self._content, bg=node_cls.COLOR)
-        type_header.pack(fill=tk.X, padx=4, pady=(4, 2))
-        tk.Label(type_header, text=node_cls.DISPLAY_NAME, bg=node_cls.COLOR,
-                 fg="white", font=("TkDefaultFont", 10, "bold")).pack(padx=6, pady=3)
+        # Node type header (Metro color tile)
+        type_header = QLabel(node_cls.DISPLAY_NAME, self._content)
+        type_header.setStyleSheet(
+            f"background: {node_cls.COLOR}; color: white;"
+            "font-weight: bold; padding: 6px 8px;"
+        )
+        self._content_layout.addWidget(type_header)
 
         # Common fields
-        common_frame = ttk.Frame(self._content)
-        common_frame.pack(fill=tk.X, padx=4, pady=4)
-        common_frame.columnconfigure(1, weight=1)
+        common_row = QWidget(self._content)
+        ch = QVBoxLayout(common_row)
+        ch.setContentsMargins(0, 4, 0, 0)
+        ch.addWidget(QLabel("Label:", common_row))
+        label_entry = QLineEdit(common_row)
+        label_entry.setText(node_model.label or "")
+        label_entry.textChanged.connect(
+            lambda text: self._on_label_change(node_model, text)
+        )
+        ch.addWidget(label_entry)
+        self._content_layout.addWidget(common_row)
 
-        ttk.Label(common_frame, text="Label:").grid(row=0, column=0, sticky="w", padx=2, pady=2)
-        label_var = tk.StringVar(value=node_model.label or "")
-        label_entry = ttk.Entry(common_frame, textvariable=label_var)
-        label_entry.grid(row=0, column=1, sticky="ew", padx=2, pady=2)
-
-        def on_label_change(*args):
-            node_model.label = label_var.get()
-            if self.on_node_change:
-                self.on_node_change()
-
-        label_var.trace_add("write", on_label_change)
-        ttk.Separator(self._content, orient=tk.HORIZONTAL).pack(fill=tk.X, padx=4, pady=2)
+        self._content_layout.addWidget(qui.hline(self._content))
 
         # Type-specific config
-        self._config_frame = ttk.Frame(self._content)
-        self._config_frame.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+        self._config_frame = QWidget(self._content)
+        self._content_layout.addWidget(self._config_frame, 1)
 
         node_instance = node_cls(node_model)
         config_widget = node_instance.get_config_frame(
             self._config_frame,
             on_change=self.on_node_change,
         )
-        config_widget.pack(fill=tk.BOTH, expand=True)
+        cfg_layout = QVBoxLayout(self._config_frame)
+        cfg_layout.setContentsMargins(0, 0, 0, 0)
+        cfg_layout.addWidget(config_widget)
+        self._content_layout.addStretch(1)
+
+    def _on_label_change(self, node_model, text):
+        node_model.label = text
+        if self.on_node_change:
+            self.on_node_change()
 
     def get_current_node(self):
         """Return the currently displayed node model."""

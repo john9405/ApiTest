@@ -1,17 +1,26 @@
 """Flow Editor — visual canvas for building workflows.
 
 Contains:
-- FlowCanvas: tk.Canvas subclass for node rendering, dragging, connections, pan/zoom
+- FlowCanvas: QPainter canvas subclass for node rendering, dragging, connections, pan/zoom
 - FlowEditor: container with toolbar, palette, canvas, inspector, console
 """
 
-import json
 import math
-import tkinter as tk
-from tkinter import  messagebox
-import ttkbootstrap as ttk
-from tkinter.scrolledtext import ScrolledText
 
+from PyQt5.QtCore import QPoint, Qt
+from PyQt5.QtWidgets import (
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QLabel,
+    QPlainTextEdit,
+    QPushButton,
+    QMenu,
+)
+
+from .. import qui
+from ..qui import Canvas
+from ..theme import style_role
 from .model import FlowModel
 from .nodes import NODE_REGISTRY, PALETTE_ENTRIES
 from .palette import NodePalette
@@ -22,7 +31,7 @@ from .inspector import FlowInspector
 # FlowCanvas — the visual graph editor
 # ---------------------------------------------------------------------------
 
-class FlowCanvas(tk.Canvas):
+class FlowCanvas(Canvas):
     """Interactive canvas for node-based workflow editing.
 
     Features:
@@ -48,10 +57,11 @@ class FlowCanvas(tk.Canvas):
     HIGHLIGHT_COMPLETED = "#10b981"
     HIGHLIGHT_ERROR = "#ef4444"
 
-    def __init__(self, master, model, on_selection_change=None, **kwargs):
-        super().__init__(master, bg=self.BG_COLOR, borderwidth=0, highlightthickness=0, **kwargs)
+    def __init__(self, master, model, on_selection_change=None, on_change=None, **kwargs):
+        super().__init__(master, bg=self.BG_COLOR, **kwargs)
         self.model = model                        # FlowModel
         self.on_selection_change = on_selection_change
+        self.on_change = on_change                # notified when the graph is edited
 
         # Interaction state
         self.scale_factor = 1.0
@@ -83,23 +93,30 @@ class FlowCanvas(tk.Canvas):
         self.bind("<Control-ButtonRelease-1>", self._on_pan_up)
 
         # Zoom on all platforms
-        if tk.TkVersion >= 8.5:
-            self.bind("<MouseWheel>", self._on_zoom)
-            self.bind("<Shift-MouseWheel>", self._on_zoom)
+        self.bind("<MouseWheel>", self._on_zoom)
+        self.bind("<Shift-MouseWheel>", self._on_zoom)
         self.bind("<Button-4>", self._on_zoom)
         self.bind("<Button-5>", self._on_zoom)
 
         self.bind("<Delete>", self._on_delete)
         self.bind("<BackSpace>", self._on_delete)
 
-        # Right-click context menu
+        # Right-click context menu.  <Button-2> is already bound to the
+        # middle-button pan above; binding it here as well made a middle click
+        # both start a pan and pop up the context menu.
         self.bind("<Button-3>", self._on_right_click)
-        self.bind("<Button-2>", self._on_right_click)
+
+        self.setFocusPolicy(Qt.StrongFocus)
+        self.render()
+
+    def _mark_dirty(self):
+        """Tell the owning editor that the graph was modified."""
+        if self.on_change:
+            self.on_change()
 
     # ------------------------------------------------------------------
     # Coordinate transforms
     # ------------------------------------------------------------------
-
     def _to_canvas(self, screen_x, screen_y):
         """Convert screen coordinates to canvas/logical coordinates."""
         cx = (screen_x - self.offset_x) / self.scale_factor
@@ -115,7 +132,6 @@ class FlowCanvas(tk.Canvas):
     # ------------------------------------------------------------------
     # Rendering
     # ------------------------------------------------------------------
-
     def render(self):
         """Full redraw of the entire canvas."""
         self.delete("all")
@@ -132,6 +148,7 @@ class FlowCanvas(tk.Canvas):
         # Draw temp connection line
         if self._temp_conn_line is not None:
             self._draw_temp_connection()
+        self.update()
 
     def _draw_grid(self):
         """Draw a light dot grid."""
@@ -171,29 +188,26 @@ class FlowCanvas(tk.Canvas):
             outline_width = 3
 
         # Node body
-        tag = f"node_{node.id}"
         self.create_rectangle(sx1, sy1, sx2, sy2,
                               fill="white", outline=outline_color,
-                              width=outline_width, tags=(tag, "node"))
+                              width=outline_width)
 
         # Color bar at top
         bar_height = 6 * self.scale_factor
         self.create_rectangle(sx1, sy1, sx2, sy1 + bar_height,
-                              fill=color, outline="", tags=(tag, "node"))
+                              fill=color, outline="")
 
         # Type label
         self.create_text(sx1 + 5 * self.scale_factor, sy1 + bar_height + 4 * self.scale_factor,
                          text=display_name, anchor="w",
-                         fill=color, font=("TkDefaultFont", 8, "bold"),
-                         tags=(tag, "node"))
+                         fill=color, font=("TkDefaultFont", 8, "bold"))
 
         # Node label
         label = node.label or display_name
         label_cy = (sy1 + sy2) / 2
         self.create_text((sx1 + sx2) / 2, label_cy,
                          text=label, anchor="center",
-                         fill="#1f2937", font=("TkDefaultFont", 9),
-                         tags=(tag, "node"))
+                         fill="#1f2937", font=("TkDefaultFont", 9))
 
         # Input ports
         node_instance = node_cls(node) if node_cls else None
@@ -203,8 +217,7 @@ class FlowCanvas(tk.Canvas):
                 spx, spy = self._to_screen(px, py)
                 self.create_oval(spx - self.PORT_RADIUS, spy - self.PORT_RADIUS,
                                  spx + self.PORT_RADIUS, spy + self.PORT_RADIUS,
-                                 fill=color, outline="white", width=1,
-                                 tags=(tag, "port", f"port_in_{node.id}_{port.port_id}"))
+                                 fill=color, outline="white", width=1)
 
             # Output ports
             for port in node_instance.OUTPUT_PORTS:
@@ -212,8 +225,7 @@ class FlowCanvas(tk.Canvas):
                 spx, spy = self._to_screen(px, py)
                 self.create_oval(spx - self.PORT_RADIUS, spy - self.PORT_RADIUS,
                                  spx + self.PORT_RADIUS, spy + self.PORT_RADIUS,
-                                 fill=color, outline="white", width=1,
-                                 tags=(tag, "port", f"port_out_{node.id}_{port.port_id}"))
+                                 fill=color, outline="white", width=1)
 
     def _draw_connection(self, conn):
         """Draw a connection line between two ports."""
@@ -226,8 +238,6 @@ class FlowCanvas(tk.Canvas):
         tx, ty = target_node.get_port_position(conn.target_port)
         ssx, ssy = self._to_screen(sx, sy)
         tsx, tsy = self._to_screen(tx, ty)
-
-        conn_tag = f"conn_{conn.id}"
 
         # Draw a bezier-like curve using control points
         dy = abs(tsy - ssy)
@@ -245,8 +255,7 @@ class FlowCanvas(tk.Canvas):
             y = (1 - t) ** 3 * ssy + 3 * (1 - t) ** 2 * t * cp1y + 3 * (1 - t) * t ** 2 * cp2y + t ** 3 * tsy
             points.extend([x, y])
 
-        self.create_line(*points, fill=self.CONNECTION_COLOR, width=self.CONNECTION_WIDTH,
-                         smooth=False, tags=(conn_tag, "connection"))
+        self.create_line(*points, fill=self.CONNECTION_COLOR, width=self.CONNECTION_WIDTH)
 
         # Arrow at target end
         arrow_size = 6
@@ -255,7 +264,6 @@ class FlowCanvas(tk.Canvas):
             tsx - arrow_size, tsy - arrow_size * 1.5,
             tsx + arrow_size, tsy - arrow_size * 1.5,
             fill=self.CONNECTION_COLOR, outline="",
-            tags=(conn_tag, "connection"),
         )
 
     def _draw_temp_connection(self):
@@ -273,13 +281,11 @@ class FlowCanvas(tk.Canvas):
         cursor_y = self.winfo_pointery() - self.winfo_rooty()
 
         self.create_line(ssx, ssy, cursor_x, cursor_y,
-                         fill="#3b82f6", dash=(4, 4), width=2,
-                         tags=("temp_connection",))
+                         fill="#3b82f6", dash=(4, 4), width=2)
 
     # ------------------------------------------------------------------
     # Hit testing
     # ------------------------------------------------------------------
-
     def _hit_port(self, screen_x, screen_y):
         """Check if a screen coordinate hits a port. Returns (node_id, port_id, direction) or None."""
         margin = self.PORT_RADIUS + 4
@@ -342,7 +348,6 @@ class FlowCanvas(tk.Canvas):
     # ------------------------------------------------------------------
     # Selection
     # ------------------------------------------------------------------
-
     def select_node(self, node_id):
         """Select a node and notify listener."""
         self.selected_node_id = node_id
@@ -361,7 +366,6 @@ class FlowCanvas(tk.Canvas):
     # ------------------------------------------------------------------
     # Mouse event handlers
     # ------------------------------------------------------------------
-
     def _on_left_down(self, event):
         """Handle left mouse button press."""
         # Check ports first
@@ -406,6 +410,8 @@ class FlowCanvas(tk.Canvas):
                 node.y += dy
                 self._drag_start_x = event.x
                 self._drag_start_y = event.y
+                if dx or dy:
+                    self._mark_dirty()
             self.render()
         elif self._drag_state == "draw_conn":
             self.render()
@@ -428,6 +434,7 @@ class FlowCanvas(tk.Canvas):
                         self._conn_source_node_id, self._conn_source_port,
                         port_hit[0], port_hit[1],
                     )
+                    self._mark_dirty()
             self._conn_source_node_id = None
             self._conn_source_port = None
             self.render()
@@ -498,12 +505,12 @@ class FlowCanvas(tk.Canvas):
     # ------------------------------------------------------------------
     # Keyboard handlers
     # ------------------------------------------------------------------
-
     def _on_delete(self, event):
         """Delete selected node or connection."""
         if self.selected_node_id is not None:
             self.model.remove_node(self.selected_node_id)
             self.selected_node_id = None
+            self._mark_dirty()
             if self.on_selection_change:
                 self.on_selection_change(None)
             self.render()
@@ -511,37 +518,37 @@ class FlowCanvas(tk.Canvas):
     # ------------------------------------------------------------------
     # Context menu
     # ------------------------------------------------------------------
-
     def _on_right_click(self, event):
         """Right-click context menu."""
         node_hit = self._hit_node(event.x, event.y)
         conn_hit = self._hit_connection(event.x, event.y)
 
-        menu = tk.Menu(self, tearoff=False)
+        menu = QMenu(self)
 
         if node_hit is not None:
             self.select_node(node_hit)
             node = self.model.get_node(node_hit)
             node_cls = NODE_REGISTRY.get(node.node_type) if node else None
             type_name = node_cls.DISPLAY_NAME if node_cls else "Node"
-            menu.add_command(label=f"Delete {type_name}",
-                             command=lambda: self._delete_node(node_hit))
+            menu.addAction(f"Delete {type_name}",
+                           lambda: self._delete_node(node_hit))
         elif conn_hit is not None:
-            menu.add_command(label="Delete Connection",
-                             command=lambda: self._delete_connection(conn_hit))
+            menu.addAction("Delete Connection",
+                           lambda: self._delete_connection(conn_hit))
         else:
             # Empty area: show add node submenu
             for entry in PALETTE_ENTRIES:
-                menu.add_command(
-                    label=f"Add {entry['name']}",
-                    command=lambda e=entry: self._add_node_at_cursor(e["type_id"], event.x, event.y),
+                menu.addAction(
+                    f"Add {entry['name']}",
+                    lambda e=entry: self._add_node_at_cursor(e["type_id"], event.x, event.y),
                 )
 
-        menu.post(event.x_root, event.y_root)
+        menu.exec_(QPoint(event.x_root, event.y_root))
 
     def _delete_node(self, node_id):
         """Delete a node and its connections."""
         self.model.remove_node(node_id)
+        self._mark_dirty()
         if self.selected_node_id == node_id:
             self.selected_node_id = None
             if self.on_selection_change:
@@ -551,6 +558,7 @@ class FlowCanvas(tk.Canvas):
     def _delete_connection(self, conn_id):
         """Delete a connection."""
         self.model.remove_connection(conn_id)
+        self._mark_dirty()
         self.render()
 
     def _add_node_at_cursor(self, type_id, screen_x, screen_y):
@@ -562,13 +570,13 @@ class FlowCanvas(tk.Canvas):
                 label = entry["name"]
                 break
         node = self.model.add_node(node_type=type_id, label=label, x=cx - 80, y=cy - 40)
+        self._mark_dirty()
         self.select_node(node.id)
         self.render()
 
     # ------------------------------------------------------------------
     # Public API for execution highlighting
     # ------------------------------------------------------------------
-
     def highlight_node(self, node_id, state):
         """Set execution highlight state for a node.
         States: 'running', 'completed', 'error', None (clear)
@@ -595,7 +603,7 @@ class FlowCanvas(tk.Canvas):
 # ---------------------------------------------------------------------------
 
 class FlowEditor:
-    """The full flow editing workspace, opened as a tab in CanvasNotebook.
+    """The full flow editing workspace, opened as a tab in the notebook.
 
     Layout:
     ┌──────────────────────────────────────────────────┐
@@ -611,7 +619,7 @@ class FlowEditor:
     def __init__(self, master, flow_id=None, on_save=None):
         """
         Args:
-            master: parent ttk.Frame (the tab frame)
+            master: parent widget (the tab frame)
             flow_id: database id of the flow, or None for a new flow
             on_save: callback when the flow is saved
         """
@@ -620,6 +628,7 @@ class FlowEditor:
         self.is_dirty = False
         self._title_callback = None
         self._is_running = False
+        self._engine = None
 
         # Load or create flow model
         if flow_id is not None:
@@ -629,45 +638,63 @@ class FlowEditor:
         else:
             self.model = FlowModel(name="New Flow")
 
+        root_layout = QVBoxLayout(self.root)
+        root_layout.setContentsMargins(0, 0, 0, 0)
+        root_layout.setSpacing(0)
+
         # Toolbar
-        self._create_toolbar()
+        root_layout.addWidget(self._create_toolbar())
 
         # Main content area
-        content = ttk.Frame(master)
-        content.pack(fill=tk.BOTH, expand=True)
+        content = QWidget(self.root)
+        cl = QHBoxLayout(content)
+        cl.setContentsMargins(0, 0, 0, 0)
+        cl.setSpacing(0)
 
         # Palette (left)
         self.palette = NodePalette(content, on_select_type=self._on_palette_select)
-        self.palette.pack(side=tk.LEFT, fill=tk.Y)
+        cl.addWidget(self.palette)
 
-        ttk.Separator(content, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y)
-
-        # Right side: inspector + console
-        right_frame = ttk.Frame(content)
-        right_frame.pack(side=tk.RIGHT, fill=tk.Y)
-
-        self.inspector = FlowInspector(right_frame, on_node_change=self._on_inspector_change)
-        self.inspector.pack(fill=tk.BOTH, expand=True)
-
-        ttk.Separator(right_frame, orient=tk.HORIZONTAL).pack(fill=tk.X)
-
-        # Console (bottom-right)
-        console_frame = ttk.Frame(right_frame, height=120)
-        console_frame.pack(fill=tk.X, side=tk.BOTTOM)
-        console_frame.pack_propagate(False)
-        ttk.Label(console_frame, text="Console", font=("TkDefaultFont", 9, "bold")).pack(
-            anchor="w", padx=4, pady=(2, 0))
-        self.console_text = ScrolledText(console_frame, height=6)
-        self.console_text.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
-
-        ttk.Separator(content, orient=tk.VERTICAL).pack(side=tk.RIGHT, fill=tk.Y)
+        cl.addWidget(qui.vline(content))
 
         # Canvas (center)
-        self.canvas = FlowCanvas(content, self.model, on_selection_change=self._on_canvas_selection)
-        self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.canvas = FlowCanvas(content, self.model,
+                                 on_selection_change=self._on_canvas_selection,
+                                 on_change=self._mark_dirty)
+        cl.addWidget(self.canvas, 1)
+
+        cl.addWidget(qui.vline(content))
+
+        # Right side: inspector + console
+        right_frame = QWidget(content)
+        rl = QVBoxLayout(right_frame)
+        rl.setContentsMargins(0, 0, 0, 0)
+        rl.setSpacing(0)
+
+        self.inspector = FlowInspector(right_frame, on_node_change=self._on_inspector_change)
+        rl.addWidget(self.inspector, 1)
+
+        rl.addWidget(qui.hline(right_frame))
+
+        console_frame = QWidget(right_frame)
+        cfl = QVBoxLayout(console_frame)
+        cfl.setContentsMargins(4, 2, 4, 4)
+        cfl.setSpacing(2)
+        console_label = QLabel("Console", console_frame)
+        console_label.setObjectName("SectionHeader")
+        cfl.addWidget(console_label)
+        self.console_text = QPlainTextEdit(console_frame)
+        self.console_text.setReadOnly(True)
+        self.console_text.setMinimumHeight(100)
+        cfl.addWidget(self.console_text, 1)
+        console_frame.setFixedHeight(160)
+        rl.addWidget(console_frame)
+
+        cl.addWidget(right_frame)
+        root_layout.addWidget(content, 1)
 
         # Bind canvas click for palette stamp placement
-        self.canvas.bind("<Button-1>", self._on_canvas_click_for_stamp, add="+")
+        self.canvas.bind("<Button-1>", self._on_canvas_click_for_stamp)
 
         # Mark as clean after initial load
         self.is_dirty = (flow_id is None)
@@ -677,37 +704,51 @@ class FlowEditor:
 
     def _create_toolbar(self):
         """Create the editor toolbar."""
-        toolbar = ttk.Frame(self.root)
-        toolbar.pack(fill=tk.X, padx=4, pady=2)
+        toolbar = QWidget(self.root)
+        tl = QHBoxLayout(toolbar)
+        tl.setContentsMargins(4, 2, 4, 2)
+        tl.setSpacing(2)
 
-        self.run_btn = ttk.Button(toolbar, text="▶ Run", command=self.run_flow, bootstyle="success")
-        self.run_btn.pack(side=tk.LEFT, padx=1)
+        self.run_btn = QPushButton("▶ Run", toolbar)
+        style_role(self.run_btn, "success")
+        self.run_btn.clicked.connect(self.run_flow)
+        tl.addWidget(self.run_btn)
 
-        self.stop_btn = ttk.Button(toolbar, text="■ Stop", command=self.stop_flow, state=tk.DISABLED, bootstyle="danger")
-        self.stop_btn.pack(side=tk.LEFT, padx=1)
+        self.stop_btn = QPushButton("■ Stop", toolbar)
+        style_role(self.stop_btn, "danger")
+        self.stop_btn.setEnabled(False)
+        self.stop_btn.clicked.connect(self.stop_flow)
+        tl.addWidget(self.stop_btn)
 
-        ttk.Separator(toolbar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=4)
+        tl.addWidget(qui.vline(toolbar))
 
-        save_btn = ttk.Button(toolbar, text="Save", command=self.save, bootstyle="primary")
-        save_btn.pack(side=tk.LEFT, padx=1)
+        save_btn = QPushButton("Save", toolbar)
+        style_role(save_btn, "primary")
+        save_btn.clicked.connect(self.save)
+        tl.addWidget(save_btn)
 
-        ttk.Separator(toolbar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=4)
+        tl.addWidget(qui.vline(toolbar))
 
-        zoom_out_btn = ttk.Button(toolbar, text="−", width=3,
-                                  command=lambda: self._zoom(0.9))
-        zoom_out_btn.pack(side=tk.LEFT, padx=1)
+        zoom_out_btn = QPushButton("−", toolbar)
+        zoom_out_btn.setFixedWidth(32)
+        zoom_out_btn.clicked.connect(lambda: self._zoom(0.9))
+        tl.addWidget(zoom_out_btn)
 
-        zoom_in_btn = ttk.Button(toolbar, text="+", width=3,
-                                 command=lambda: self._zoom(1.1))
-        zoom_in_btn.pack(side=tk.LEFT, padx=1)
+        zoom_in_btn = QPushButton("+", toolbar)
+        zoom_in_btn.setFixedWidth(32)
+        zoom_in_btn.clicked.connect(lambda: self._zoom(1.1))
+        tl.addWidget(zoom_in_btn)
 
-        fit_btn = ttk.Button(toolbar, text="Fit", command=self.fit_to_window)
-        fit_btn.pack(side=tk.LEFT, padx=1)
+        fit_btn = QPushButton("Fit", toolbar)
+        fit_btn.clicked.connect(self.fit_to_window)
+        tl.addWidget(fit_btn)
+
+        tl.addStretch(1)
+        return toolbar
 
     # ------------------------------------------------------------------
     # Palette stamp integration
     # ------------------------------------------------------------------
-
     def _on_palette_select(self, type_id):
         """Called when user clicks a block type in the palette."""
         self.canvas.configure(cursor="crosshair")
@@ -721,8 +762,7 @@ class FlowEditor:
                 self.canvas.place_node(selected, event.x, event.y)
                 self.canvas.configure(cursor="")
                 self.palette.clear_selection()
-                self.is_dirty = True
-                self._update_title()
+                self._mark_dirty()
 
     def _on_canvas_selection(self, node_model):
         """Called when a node is selected on the canvas."""
@@ -730,14 +770,12 @@ class FlowEditor:
 
     def _on_inspector_change(self):
         """Called when the inspector modifies node properties."""
-        self.is_dirty = True
-        self._update_title()
+        self._mark_dirty()
         self.canvas.render()
 
     # ------------------------------------------------------------------
     # Zoom helpers
     # ------------------------------------------------------------------
-
     def _zoom(self, factor):
         """Zoom the canvas by a factor."""
         self.canvas.scale_factor = max(0.2, min(3.0, self.canvas.scale_factor * factor))
@@ -767,7 +805,6 @@ class FlowEditor:
     # ------------------------------------------------------------------
     # Title management
     # ------------------------------------------------------------------
-
     def get_title(self):
         """Return the tab title."""
         title = self.model.name or "New Flow"
@@ -779,6 +816,20 @@ class FlowEditor:
         """Set callback for title changes (called by main.py)."""
         self._title_callback = callback
 
+    def _mark_dirty(self):
+        """Flag the graph as modified and refresh the tab's ``*`` marker.
+
+        Every mutation has to go through here.  Only the palette stamp and the
+        inspector used to set is_dirty, so moving nodes, drawing or deleting
+        connections and deleting nodes left the flow looking saved: the close
+        prompt never appeared, the ``*`` never showed, and Run could execute a
+        stale database copy.
+        """
+        if self.is_dirty:
+            return
+        self.is_dirty = True
+        self._update_title()
+
     def _update_title(self):
         """Notify the notebook of a title change."""
         if self._title_callback:
@@ -787,7 +838,6 @@ class FlowEditor:
     # ------------------------------------------------------------------
     # Save / Load
     # ------------------------------------------------------------------
-
     def save(self):
         """Save the flow to the database."""
         self.model.save()
@@ -800,7 +850,6 @@ class FlowEditor:
     # ------------------------------------------------------------------
     # Run / Stop
     # ------------------------------------------------------------------
-
     def run_flow(self):
         """Execute the workflow."""
         from .engine import FlowEngine
@@ -808,7 +857,7 @@ class FlowEditor:
         if self._is_running:
             return
         if not self.model.nodes:
-            messagebox.showinfo("Run Flow", "Add some blocks to the flow first.")
+            qui.show_info(self.root, "Run Flow", "Add some blocks to the flow first.")
             return
 
         # Save before running
@@ -816,35 +865,49 @@ class FlowEditor:
             self.save()
 
         self._is_running = True
-        self.run_btn.configure(state=tk.DISABLED)
-        self.stop_btn.configure(state=tk.NORMAL)
+        self.run_btn.setEnabled(False)
+        self.stop_btn.setEnabled(True)
         self.canvas.clear_highlights()
-        self.console_text.delete("1.0", tk.END)
+        self.console_text.clear()
 
-        engine = FlowEngine(self.model, self.canvas, self)
-        engine.on_complete = self._on_flow_complete
-        engine.run()
+        # Keep a reference: the engine has to be reachable from the UI thread so
+        # Stop can actually cancel it (and so a tab close can shut it down).
+        self._engine = FlowEngine(self.model, self.canvas, self)
+        self._engine.on_complete = self._on_flow_complete
+        self._engine.run()
 
     def stop_flow(self):
         """Request workflow execution to stop."""
-        # The engine checks this flag
-        self._is_running = False
+        if self._engine is not None:
+            self._engine.stop()
         self._console_log("⏹ Stopping flow...")
+
+    def shutdown(self):
+        """Cancel a run in progress; called when the tab is closed.
+
+        Without this the engine keeps posting highlight callbacks to a canvas
+        that Qt has already destroyed.
+        """
+        if self._engine is not None:
+            self._engine.stop()
+            self._engine.on_complete = None
+            self._engine = None
+        self._is_running = False
 
     def _on_flow_complete(self):
         """Called when execution finishes."""
+        self._engine = None
         self._is_running = False
-        self.run_btn.configure(state=tk.NORMAL)
-        self.stop_btn.configure(state=tk.DISABLED)
+        self.run_btn.setEnabled(True)
+        self.stop_btn.setEnabled(False)
 
     # ------------------------------------------------------------------
     # Console output (used by FlowEngine)
     # ------------------------------------------------------------------
-
     def _console_log(self, message):
         """Append a message to the console."""
-        self.console_text.insert(tk.END, message + "\n")
-        self.console_text.see(tk.END)
+        self.console_text.appendPlainText(message)
+        self.console_text.ensureCursorVisible()
 
     def log(self, *args):
         """Public console.log() compatible interface."""

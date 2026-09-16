@@ -1,0 +1,33 @@
+# Project metadata for ApiTest (a desktop HTTP API client).
+#
+# This file exists so that tooling — pip, dependency scanners, and editors —
+# can see the supported interpreter floor and the dependency set.  The
+# application itself is run in place (`python __main__.py`) and shipped as a
+# bundle via the PyInstaller spec in ApiTest.spec; it is not installed as a
+# library.  Runtime versions below are what the project is developed and
+# verified against.
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "apitest"
+version = "1.0.0"
+description = "Desktop HTTP API testing tool with collections, environments, history, scripting and flow automation"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+# Single source of truth: the same file users install from.
+dynamic = ["dependencies"]
+
+[project.optional-dependencies]
+# Kerberos / NTLM auth back ends; nothing imports them yet.  See
+# requirements-optional.txt for why they are not installed by default.
+auth = [
+    "requests-kerberos>=0.14",
+    "requests_ntlm>=1.2",
+]
+
+[tool.setuptools.dynamic]
+dependencies = { file = ["requirements.txt"] }

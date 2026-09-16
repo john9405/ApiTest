@@ -1,10 +1,19 @@
-beautifulsoup4
-pillow
-pycryptodome
-requests
-requests-oauthlib
-requests_kerberos
-requests_ntlm
-oauthlib
-cryptography
-ttkbootstrap
+# Runtime dependencies for ApiTest.
+#
+# Floors are the oldest releases verified to work on Python 3.11 with this
+# code base; they are intentionally loose so `pip install -U` can move forward.
+# Optional authentication back ends live in requirements-optional.txt.
+
+beautifulsoup4>=4.11      # response body parsing (src/req.py)
+pillow>=9.2               # image response preview (src/req.py)
+pycryptodome>=3.15        # AES tool (src/tools/aes.py)
+requests>=2.28            # HTTP engine (src/req.py, src/flow/nodes.py)
+requests-oauthlib>=1.3    # OAuth 1.0 auth (src/req.py)
+oauthlib>=3.2             # OAuth 1.0 signing backend (src/req.py)
+cryptography>=38.0        # RSA key tool (src/tools/RSA.py)
+PyQt5>=5.15.6             # entire UI layer
+# PyQt5 no longer ships QtWebKit, so the HTML response preview (src/webview.py)
+# falls back to Qt's rich-text engine: HTML/CSS subset, no JavaScript.  Install
+# the Chromium-based renderer by hand for a full preview — it is a large
+# download (the Qt WebEngine libraries), so it is not a runtime requirement:
+#     pip install PyQtWebEngine

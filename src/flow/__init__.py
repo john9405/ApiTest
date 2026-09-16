@@ -12,3 +12,15 @@ from .editor import FlowEditor, FlowCanvas
 from .model import FlowModel, NodeModel, ConnectionModel
 from .engine import FlowEngine
 from .nodes import NODE_REGISTRY, PALETTE_ENTRIES
+
+__all__ = [
+    "FlowWindow",
+    "FlowEditor",
+    "FlowCanvas",
+    "FlowModel",
+    "NodeModel",
+    "ConnectionModel",
+    "FlowEngine",
+    "NODE_REGISTRY",
+    "PALETTE_ENTRIES",
+]

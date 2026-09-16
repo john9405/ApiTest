@@ -48,11 +48,8 @@ class FlowEngine:
 
     def _execute(self):
         """Main execution loop — runs in background thread."""
-        # Build adjacency: node_id -> list of (source_port, target_node_id)
-        adjacency = self._build_adjacency()
-
         # Find start nodes: nodes with no incoming connections
-        start_nodes = self._find_start_nodes(adjacency)
+        start_nodes = self._find_start_nodes()
 
         if not start_nodes:
             # If every node has an incoming connection, start with the first one
@@ -65,7 +62,7 @@ class FlowEngine:
             for node_id in start_nodes:
                 if self.cancelled:
                     break
-                self._traverse(node_id, adjacency)
+                self._traverse(node_id)
 
             if self.cancelled:
                 self._log_to_console("info", "Flow execution cancelled.")
@@ -78,7 +75,7 @@ class FlowEngine:
             if self.on_complete:
                 self.canvas.after(0, self.on_complete)
 
-    def _traverse(self, node_id, adjacency, incoming_port="input"):
+    def _traverse(self, node_id):
         """Execute a single node and recursively follow its outgoing connections."""
         if node_id in self.visited or self.cancelled:
             return
@@ -103,12 +100,22 @@ class FlowEngine:
         try:
             output = node_instance.execute(self.context, self._console_adapter())
             self.context[node_id] = output
-            self.canvas.after(0, lambda: self.canvas.highlight_node(node_id, "completed"))
         except Exception as e:
             self.context[node_id] = {"error": str(e)}
             self._log_to_console("error", f"{node_model.label}: {str(e)}")
             self.canvas.after(0, lambda: self.canvas.highlight_node(node_id, "error"))
             return  # Stop traversal from this node on error
+
+        # Several node types report failure by *returning* {"error": ...} rather
+        # than raising.  Treating that as success highlighted the node green and
+        # kept following the happy path — for a Condition it silently took the
+        # false branch.
+        if isinstance(output, dict) and output.get("error"):
+            self._log_to_console("error", f"{node_model.label}: {output['error']}")
+            self.canvas.after(0, lambda: self.canvas.highlight_node(node_id, "error"))
+            return
+
+        self.canvas.after(0, lambda: self.canvas.highlight_node(node_id, "completed"))
 
         # Determine which output port(s) to follow
         if node_model.node_type == "condition" and "branch" in output:
@@ -120,22 +127,9 @@ class FlowEngine:
         for conn in self.model.get_outgoing_connections(node_id, source_port):
             if self.cancelled:
                 break
-            self._traverse(conn.target_node_id, adjacency, conn.target_port)
+            self._traverse(conn.target_node_id)
 
-    def _build_adjacency(self):
-        """Build adjacency list from connections.
-
-        Returns: dict of node_id -> list of ConnectionModel (outgoing)
-        """
-        adjacency = {}
-        for node in self.model.nodes:
-            adjacency[node.id] = []
-        for conn in self.model.connections:
-            if conn.source_node_id in adjacency:
-                adjacency[conn.source_node_id].append(conn)
-        return adjacency
-
-    def _find_start_nodes(self, adjacency):
+    def _find_start_nodes(self):
         """Find nodes with no incoming connections (start nodes)."""
         has_incoming = set()
         for conn in self.model.connections:

@@ -4,8 +4,6 @@ FlowModel holds the in-memory representation of a workflow graph.
 It acts as a bridge between the visual canvas and the database (via dao.crud).
 """
 
-import uuid
-
 from ..dao.crud import (
     create_flow,
     update_flow,
@@ -13,12 +11,9 @@ from ..dao.crud import (
     retrieve_flow,
     list_flow,
     create_flow_node,
-    update_flow_node,
-    delete_flow_node,
     list_flow_node,
     delete_flow_node_by_flow,
     create_flow_connection,
-    delete_flow_connection,
     list_flow_connection,
     delete_flow_connection_by_flow,
 )
@@ -193,7 +188,10 @@ class FlowModel:
 
     def save(self):
         """Persist the entire flow graph to the database."""
-        if self.id is None:
+        if self.id is None or retrieve_flow(id=self.id) is None:
+            # The row can be gone (deleted from the sidebar while this editor
+            # was open).  Re-create it instead of writing nodes that point at a
+            # flow_id which no longer exists.
             self.id = create_flow(name=self.name, description=self.description)
         else:
             update_flow(id=self.id, name=self.name, description=self.description)
@@ -219,15 +217,22 @@ class FlowModel:
             id_map[old_id] = new_id
             node.id = new_id
 
-        # Persist connections with remapped node ids
+        # Persist connections with remapped node ids.  The in-memory endpoints
+        # have to be remapped too: leaving them pointing at the pre-save ids
+        # made every edge dangle after a save (the canvas stopped drawing them,
+        # the engine stopped following them, and the next save raised KeyError).
         for conn in self.connections:
-            create_flow_connection(
+            source_id = id_map.get(conn.source_node_id, conn.source_node_id)
+            target_id = id_map.get(conn.target_node_id, conn.target_node_id)
+            conn.id = create_flow_connection(
                 flow_id=self.id,
-                source_node_id=id_map[conn.source_node_id],
+                source_node_id=source_id,
                 source_port=conn.source_port,
-                target_node_id=id_map[conn.target_node_id],
+                target_node_id=target_id,
                 target_port=conn.target_port,
             )
+            conn.source_node_id = source_id
+            conn.target_node_id = target_id
 
     @classmethod
     def load(cls, flow_id):

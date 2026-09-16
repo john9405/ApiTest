@@ -1,10 +1,11 @@
 import os
 import json
-import platform
-import tkinter as tk
-import ttkbootstrap as ttk
+
+from PyQt5.QtCore import QPoint
 
 from . import WORK_DIR
+from . import qui
+from .qui import TreeView
 from .dao.crud import list_history, create_history, delete_history, retrieve_history, delete_all_history
 
 
@@ -18,38 +19,30 @@ class HistoryWindow:
         self.window = window
         self.callback = callback
 
-        self.treeview = ttk.Treeview(window, show='headings', columns=("method", "url"))
-        self.treeview.heading("#1", text="Method")
-        self.treeview.heading("#2", text="URL")
-        self.treeview.column("#1", width=1)
-        self.treeview.column("#2", width=100)
-        scrollbar = ttk.Scrollbar(window, command=self.treeview.yview)
-        scrollbar.pack(fill=tk.Y, side=tk.RIGHT)
-        self.treeview.pack(side=tk.LEFT, fill=tk.BOTH, expand=tk.YES)
-        self.treeview.config(yscrollcommand=scrollbar.set)
-        self.treeview.bind("<Double-Button-1>", self.on_select)
-        if platform.system() == "Darwin":
-            self.treeview.bind("<Control-Button-1>", self.on_right_click)
-            self.treeview.bind("<Button-2>", self.on_right_click)
-        else:
-            self.treeview.bind("<Button-3>", self.on_right_click)
+        self.root = TreeView(window, show="headings", columns=("method", "url"))
+        self.root.heading("#1", text="Method")
+        self.root.heading("#2", text="URL")
+        self.root.column("#1", width=10)
+        self.root.column("#2", width=100)
+        self.root.bind("<Double-1>", self.on_select)
+        self.root.bind("<Button-3>", self.on_right_click)
 
     def on_delete(self):
-        if len(self.treeview.selection()) > 0:
-            for item_id in self.treeview.selection():
-                item = self.treeview.item(item_id)
-                delete_history(**{"id": item['text']})
-                self.treeview.delete(item_id)
+        if len(self.root.selection()) > 0:
+            for item_id in self.root.selection():
+                item = self.root.item(item_id)
+                delete_history(**{"id": item["text"]})
+                self.root.delete(item_id)
 
     def on_clear(self):
-        self.treeview.delete(*self.treeview.get_children())
+        self.root.delete(self.root.get_children())
         delete_all_history()
 
     def on_select(self, event):
-        item_id = self.treeview.identify_row(event.y)
+        item_id = self.root.identify_row(event.y)
         if item_id:
-            item = self.treeview.item(item_id)
-            data = retrieve_history(**{"id": item['text']})
+            item = self.root.item(item_id)
+            data = retrieve_history(**{"id": item["text"]})
             if data is None:
                 return
             self.callback(data={
@@ -65,23 +58,26 @@ class HistoryWindow:
             })
 
     def on_right_click(self, event):
-        region = self.treeview.identify('region', event.x, event.y)
-        menu = tk.Menu(self.window, tearoff=0)
+        region = self.root.identify('region', event.x, event.y)
+        menu = qui.make_menu(self.window)
         if region == 'cell':
-            if len(self.treeview.selection()) <= 0:
-                item_id = self.treeview.identify_row(event.y)
-                self.treeview.selection_set(item_id)
-            menu.add_command(label="Open", command=lambda: self.on_select(event))
-            menu.add_command(label="Delete", command=self.on_delete)
-            menu.add_command(label="Clear", command=self.on_clear)
+            if len(self.root.selection()) <= 0:
+                item_id = self.root.identify_row(event.y)
+                self.root.selection_set(item_id)
+            menu.addAction("Open", lambda: self.on_select(event))
+            menu.addAction("Delete", self.on_delete)
+            menu.addAction("Clear", self.on_clear)
         elif region == 'nothing':
-            menu.add_command(label="Clear", command=self.on_clear)
-        menu.post(event.x_root, event.y_root)
+            menu.addAction("Clear", self.on_clear)
+        menu.exec_(QPoint(event.x_root, event.y_root))
 
     def on_start(self):
         data = list_history()
-        for item in data:
-            self.treeview.insert("", 0, text=item['id'], values=(item.get('method', ''), item.get('url', '')))
+        def populate():
+            for item in data:
+                self.root.insert("", 0, text=item['id'],
+                                 values=(item.get('method', ''), item.get('url', '')))
+        self.root.after(0, populate)
 
     def on_end(self):
         pass
@@ -95,9 +91,10 @@ class HistoryWindow:
             "body": json.dumps(data.get('body', {})),
             "auth": json.dumps(data.get('auth', {})),
             "pre_script": data.get('pre_request_script', ''),
-            "post_script":data.get("tests", ""),
-            "res_body":"",
-            "res_headers":"",
-            "res_cookies":""
+            "post_script": data.get("tests", ""),
+            "res_body": "",
+            "res_headers": "",
+            "res_cookies": ""
         })
-        self.treeview.insert("", 0, text=inserted_id, values=(data.get('method', ''), data.get('url', '')))
+        self.root.insert("", 0, text=inserted_id,
+                         values=(data.get('method', ''), data.get('url', '')))

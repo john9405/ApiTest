@@ -1,17 +1,31 @@
 import json
 import os
-import platform
 import threading
-import tkinter as tk
-from tkinter import filedialog, messagebox, simpledialog
-import ttkbootstrap as ttk
-from tkinter.scrolledtext import ScrolledText
 import time
 import re
 import xml.dom.minidom
 from io import BytesIO
 import urllib.parse
-from typing import Optional
+
+from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtWidgets import (
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QGridLayout,
+    QLabel,
+    QLineEdit,
+    QComboBox,
+    QPlainTextEdit,
+    QPushButton,
+    QTabWidget,
+    QSplitter,
+    QScrollArea,
+    QRadioButton,
+    QButtonGroup,
+    QStackedWidget,
+    QFrame,
+)
 
 import requests
 from requests.auth import HTTPBasicAuth
@@ -30,10 +44,14 @@ from oauthlib.oauth1 import (
     SIGNATURE_TYPE_BODY,
 )
 from bs4 import BeautifulSoup
-from PIL import Image, ImageTk
+from PIL import Image
 
+from . import qui
+from . import webview
+from .qui import END, ask_string, show_error, show_warning, open_file
+from .theme import style_role
 from .dao.crud import update_request
-from .utils import EditorTable, CodeEditor
+from .utils import EditorTable, CodeEditor, ConsoleText, Console
 
 
 class ParamsFrame(EditorTable):
@@ -41,24 +59,18 @@ class ParamsFrame(EditorTable):
         self.cb = kw.pop("cb")
         super().__init__(master, **kw)
 
-    def commit(
-        self,
-        item_id: Optional[str] = None,
-        win: Optional[tk.Toplevel] = None,
-        name_entry: Optional[ttk.Entry] = None,
-        value_entry: Optional[ScrolledText] = None,
-    ):
-        name = name_entry.get()
-        value = value_entry.get("1.0", "end")
+    def commit(self, item_id=None, win=None, name_entry=None, value_entry=None):
+        name = name_entry.text()
+        value = value_entry.toPlainText()
         if self.check_name(item_id, name):
             if item_id is None:
-                self.treeview.insert("", tk.END, values=(name, value))
+                self.treeview.insert("", END, values=(name, value))
             else:
                 self.treeview.item(item_id, values=(name, value))
-            win.destroy()
+            win.accept()
             self.cb(str(urllib.parse.urlencode(self.get_data())))
         else:
-            messagebox.showerror("error", "Duplicate key")
+            show_error(self, "error", "Duplicate key")
 
     def on_del(self):
         if self.editable and len(self.treeview.selection()) > 0:
@@ -66,51 +78,52 @@ class ParamsFrame(EditorTable):
             self.cb(str(urllib.parse.urlencode(self.get_data())))
 
 
-class OauthFrame(ttk.Frame):
-    def __init__(self, master=None, **kw):
-        super().__init__(master, **kw)
+class OauthFrame(QWidget):
+    """OAuth 1.0 configuration panel (HMAC / RSA pages)."""
 
-        self.main_frame = None
-        self.rsa_key_text = None
-        self.client_key = tk.StringVar(self)
-        self.client_secret = tk.StringVar(self)
-        self.resource_owner_key = tk.StringVar(self)
-        self.resource_owner_secret = tk.StringVar(self)
-        self.signature_type = tk.StringVar(self, value=SIGNATURE_TYPE_AUTH_HEADER)
-        self.signature_method = tk.StringVar(self, value=SIGNATURE_HMAC_SHA1)
-        self.signature_method.trace_add("write", self.change_page)
+    def __init__(self, master=None, **kw):
+        super().__init__(master)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        self.client_key = ""
+        self.client_secret = ""
+        self.resource_owner_key = ""
+        self.resource_owner_secret = ""
+        self.rsa_key = ""
         self.cpage = "hmac_page"
 
-        self.canvas = tk.Canvas(self, borderwidth=0, highlightthickness=0)
-        self.scrollbar = ttk.Scrollbar(self, orient=tk.VERTICAL, command=self.canvas.yview)
-        self.canvas.configure(yscrollcommand=self.scrollbar.set)
-        self.scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scroll = QScrollArea(self)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        layout.addWidget(scroll)
 
-        self.content_frame = ttk.Frame(self.canvas)
-        self.content_window = self.canvas.create_window((0, 0), window=self.content_frame, anchor="nw")
-        self.content_frame.bind("<Configure>", self._on_content_configure)
-        self.canvas.bind("<Configure>", self._on_canvas_configure)
+        content = QWidget(scroll)
+        content.setObjectName("OauthContent")
+        scroll.setWidget(content)
+        vbox = QVBoxLayout(content)
+        vbox.setContentsMargins(4, 8, 4, 8)
+        vbox.setSpacing(8)
 
-        frame = ttk.Frame(self.content_frame)
-        frame.columnconfigure(1, weight=1)
-        ttk.Label(frame, text="Add authorization data to", width=22).grid(
-            row=0, column=0, sticky="w"
+        # ---- header rows ----
+        row1 = QWidget(content)
+        h1 = QHBoxLayout(row1)
+        h1.setContentsMargins(0, 0, 0, 0)
+        h1.addWidget(QLabel("Add authorization data to", row1))
+        self.signature_type = QComboBox(row1)
+        self.signature_type.addItems(
+            (SIGNATURE_TYPE_AUTH_HEADER, SIGNATURE_TYPE_QUERY, SIGNATURE_TYPE_BODY)
         )
-        ttk.Combobox(
-            frame,
-            values=(
-                SIGNATURE_TYPE_AUTH_HEADER,
-                SIGNATURE_TYPE_QUERY,
-                SIGNATURE_TYPE_BODY,
-            ),
-            textvariable=self.signature_type,
-            state="readonly",
-        ).grid(row=0, column=1, sticky="ew")
-        ttk.Label(frame, text="Signature Method").grid(row=1, column=0, sticky="w", pady=3)
-        ttk.Combobox(
-            frame,
-            values=(
+        h1.addWidget(self.signature_type, 1)
+        vbox.addWidget(row1)
+
+        row2 = QWidget(content)
+        h2 = QHBoxLayout(row2)
+        h2.setContentsMargins(0, 0, 0, 0)
+        h2.addWidget(QLabel("Signature Method", row2))
+        self.signature_method = QComboBox(row2)
+        self.signature_method.addItems(
+            (
                 SIGNATURE_HMAC_SHA1,
                 SIGNATURE_HMAC_SHA256,
                 SIGNATURE_HMAC_SHA512,
@@ -118,21 +131,76 @@ class OauthFrame(ttk.Frame):
                 SIGNATURE_RSA_SHA256,
                 SIGNATURE_RSA_SHA512,
                 SIGNATURE_PLAINTEXT,
-            ),
-            textvariable=self.signature_method,
-            state="readonly",
-        ).grid(row=1, column=1, sticky="ew")
-        frame.pack(fill="x", padx=5, pady=5)
-        self._bind_scroll_events(frame)
+            )
+        )
+        self.signature_method.currentTextChanged.connect(self.change_page)
+        h2.addWidget(self.signature_method, 1)
+        vbox.addWidget(row2)
 
-        self.page_container = ttk.Frame(self.content_frame)
-        self.page_container.pack(fill="both", expand=True, padx=5, pady=(0, 5))
-        self.hmac_page()
-        self._bind_scroll_events(self.main_frame)
-        self.after_idle(self._refresh_scroll_region)
+        # ---- pages ----
+        self.stack = QStackedWidget(content)
+        vbox.addWidget(self.stack, 1)
+
+        self.hmac_page_widget = self._build_hmac_page(content)
+        self.rsa_page_widget = self._build_rsa_page(content)
+        self.stack.addWidget(self.hmac_page_widget)
+        self.stack.addWidget(self.rsa_page_widget)
+
+        self.hmac_fields = (
+            self._hmac_client_key, self._hmac_client_secret,
+            self._hmac_token, self._hmac_token_secret,
+        )
+        self.rsa_fields = (self._rsa_client_key, self._rsa_token, self._rsa_key_text)
+        self.change_page()
+
+    # ------------------------------------------------------------------
+    # Pages
+    # ------------------------------------------------------------------
+    def _field_row(self, parent, grid, row, label, echo=None):
+        grid.addWidget(QLabel(label, parent), row, 0)
+        edit = QLineEdit(parent)
+        if echo == "password":
+            edit.setEchoMode(QLineEdit.Password)
+        grid.addWidget(edit, row, 1)
+        return edit
+
+    def _build_hmac_page(self, parent):
+        page = QWidget(parent)
+        grid = QGridLayout(page)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setSpacing(8)
+        self._hmac_client_key = self._field_row(page, grid, 0, "Consumer Key")
+        self._hmac_client_secret = self._field_row(page, grid, 1, "Consumer Secret")
+        self._hmac_token = self._field_row(page, grid, 2, "Access Token")
+        self._hmac_token_secret = self._field_row(page, grid, 3, "Token Secret")
+        grid.setColumnStretch(1, 1)
+        # absorb leftover height below the fields so rows keep an even,
+        # compact 8px rhythm instead of being spread out by the layout
+        grid.setRowStretch(4, 1)
+        return page
+
+    def _build_rsa_page(self, parent):
+        page = QWidget(parent)
+        grid = QGridLayout(page)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setSpacing(8)
+        self._rsa_client_key = self._field_row(page, grid, 0, "Consumer Key")
+        self._rsa_token = self._field_row(page, grid, 1, "Access Token")
+        grid.addWidget(QLabel("Private key", page), 2, 0)
+        btn = QPushButton("Select File", page)
+        style_role(btn, "info")
+        btn.clicked.connect(self.on_open)
+        grid.addWidget(btn, 2, 1, alignment=Qt.AlignLeft)
+        self._rsa_key_text = QPlainTextEdit(page)
+        self._rsa_key_text.setMinimumHeight(160)
+        grid.addWidget(self._rsa_key_text, 3, 1)
+        grid.setColumnStretch(1, 1)
+        grid.setRowStretch(3, 1)
+        return page
 
     def change_page(self, *args):
-        if self.signature_method.get() in (
+        method = self.signature_method.currentText()
+        if method in (
             SIGNATURE_HMAC_SHA1,
             SIGNATURE_HMAC_SHA256,
             SIGNATURE_HMAC_SHA512,
@@ -142,319 +210,271 @@ class OauthFrame(ttk.Frame):
         else:
             new_page = "rsa_page"
         if self.cpage != new_page:
-            self._build_page(new_page)
-
-    def _on_content_configure(self, _event=None):
-        self._refresh_scroll_region()
-
-    def _on_canvas_configure(self, event):
-        self.canvas.itemconfigure(self.content_window, width=event.width)
-        self._refresh_scroll_region()
-
-    def _refresh_scroll_region(self):
-        self.update_idletasks()
-        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
-
-    def _bind_scroll_events(self, widget):
-        if isinstance(widget, ScrolledText):
-            return
-        widget.bind("<MouseWheel>", self._on_mousewheel, add="+")
-        widget.bind("<Button-4>", self._on_mousewheel, add="+")
-        widget.bind("<Button-5>", self._on_mousewheel, add="+")
-        for child in widget.winfo_children():
-            self._bind_scroll_events(child)
-
-    def _on_mousewheel(self, event):
-        if event.num == 4:
-            self.canvas.yview_scroll(-1, "units")
-            return "break"
-        if event.num == 5:
-            self.canvas.yview_scroll(1, "units")
-            return "break"
-        if event.delta:
-            self.canvas.yview_scroll(int(-event.delta / 120), "units")
-            return "break"
-        return None
-
-    def _build_page(self, page_name):
-        if self.main_frame is not None:
-            self.main_frame.destroy()
-            self.main_frame = None
-            self.rsa_key_text = None
-        if page_name == "hmac_page":
-            self.hmac_page()
-        else:
-            self.rsa_page()
-        self.cpage = page_name
-        self.canvas.yview_moveto(0)
-        self._bind_scroll_events(self.main_frame)
-        self.after_idle(self._refresh_scroll_region)
-
-    def hmac_page(self):
-        self.main_frame = ttk.Frame(self.page_container)
-        self.main_frame.columnconfigure(1, weight=1)
-        ttk.Label(self.main_frame, text="Consumer Key", width=22).grid(row=0, column=0, sticky="w")
-        ttk.Entry(self.main_frame, textvariable=self.client_key).grid(row=0, column=1, sticky="ew")
-        ttk.Label(self.main_frame, text="Consumer Secret").grid(row=1, column=0, sticky="w", pady=3)
-        ttk.Entry(self.main_frame, textvariable=self.client_secret).grid(row=1, column=1, sticky="ew")
-        ttk.Label(self.main_frame, text="Access Token").grid(row=2, column=0, sticky="w")
-        ttk.Entry(self.main_frame, textvariable=self.resource_owner_key).grid(row=2, column=1, sticky="ew")
-        ttk.Label(self.main_frame, text="Token Secret").grid(row=3, column=0, sticky="w", pady=3)
-        ttk.Entry(self.main_frame, textvariable=self.resource_owner_secret).grid(row=3, column=1, sticky="ew")
-        self.main_frame.pack(fill="x")
-
-    def rsa_page(self):
-        self.main_frame = ttk.Frame(self.page_container)
-        self.main_frame.columnconfigure(1, weight=1)
-        ttk.Label(self.main_frame, text="Consumer Key", width=22).grid(row=0, column=0, sticky="w")
-        ttk.Entry(self.main_frame, textvariable=self.client_key).grid(row=0, column=1, sticky="ew")
-        ttk.Label(self.main_frame, text="Access Token").grid(row=1, column=0, sticky="w", pady=3)
-        ttk.Entry(self.main_frame, textvariable=self.resource_owner_key).grid(row=1, column=1, sticky="ew")
-        ttk.Label(self.main_frame, text="Private key").grid(row=2, column=0, sticky="w")
-        ttk.Button(self.main_frame, text="Select File", command=self.on_open, bootstyle="info").grid(row=2, column=1, sticky="w")
-        self.rsa_key_text = ScrolledText(self.main_frame, width=40, height=30)
-        self.rsa_key_text.grid(row=3, column=1, sticky="nsew")
-        self.main_frame.pack(fill="both", expand=True)
+            self.cpage = new_page
+        self.stack.setCurrentWidget(
+            self.hmac_page_widget if new_page == "hmac_page" else self.rsa_page_widget
+        )
 
     def on_open(self):
-        filepath = filedialog.askopenfilename(initialdir=os.path.expanduser("~"))
+        filepath = open_file(self, "Open", [("All Files", "*.*")],
+                             initialdir=os.path.expanduser("~"))
         if filepath:
             with open(filepath, "r", encoding="utf-8") as f:
-                self.rsa_key_text.delete("1.0", "end")
-                self.rsa_key_text.insert(tk.END, f.read())
+                self._rsa_key_text.setPlainText(f.read())
 
+    # ------------------------------------------------------------------
+    # Load / save
+    # ------------------------------------------------------------------
     def set(self, data: dict):
         signature_method = data.get("signature_method", SIGNATURE_HMAC_SHA1)
-        if signature_method in (
-            SIGNATURE_HMAC_SHA1,
-            SIGNATURE_HMAC_SHA256,
-            SIGNATURE_HMAC_SHA512,
-            SIGNATURE_PLAINTEXT,
-        ):
-            self._build_page("hmac_page")
-            self.client_key.set(data.get("client_key", ""))
-            self.client_secret.set(data.get("client_secret", ""))
-            self.resource_owner_key.set(data.get("resource_owner_key", ""))
-            self.resource_owner_secret.set(data.get("resource_owner_secret", ""))
-            self.signature_type.set(data.get("signature_type", SIGNATURE_TYPE_AUTH_HEADER))
-            self.signature_method.set(signature_method)
+        self.signature_type.setCurrentText(data.get("signature_type", SIGNATURE_TYPE_AUTH_HEADER))
+        self.signature_method.setCurrentText(signature_method)
+        self.change_page()
+        if self.cpage == "hmac_page":
+            self._hmac_client_key.setText(data.get("client_key", ""))
+            self._hmac_client_secret.setText(data.get("client_secret", ""))
+            self._hmac_token.setText(data.get("resource_owner_key", ""))
+            self._hmac_token_secret.setText(data.get("resource_owner_secret", ""))
         else:
-            self._build_page("rsa_page")
-            self.client_key.set(data.get("client_key", ""))
-            self.resource_owner_key.set(data.get("resource_owner_key", ""))
-            self.rsa_key_text.delete("1.0", "end")
-            self.rsa_key_text.insert("1.0", data.get("rsa_key", ""))
-            self.signature_type.set(data.get("signature_type", SIGNATURE_TYPE_AUTH_HEADER))
-            self.signature_method.set(signature_method)
+            self._rsa_client_key.setText(data.get("client_key", ""))
+            self._rsa_token.setText(data.get("resource_owner_key", ""))
+            self._rsa_key_text.setPlainText(data.get("rsa_key", ""))
 
     def get(self):
-        if self.signature_method.get() in (
-            SIGNATURE_HMAC_SHA1,
-            SIGNATURE_HMAC_SHA256,
-            SIGNATURE_HMAC_SHA512,
-            SIGNATURE_PLAINTEXT,
-        ):
+        if self.cpage == "hmac_page":
             data = {
-                "client_key": self.client_key.get(),
-                "client_secret": self.client_secret.get(),
-                "resource_owner_key": self.resource_owner_key.get(),
-                "resource_owner_secret": self.resource_owner_secret.get(),
-                "signature_type": self.signature_type.get(),
-                "signature_method": self.signature_method.get(),
+                "client_key": self._hmac_client_key.text(),
+                "client_secret": self._hmac_client_secret.text(),
+                "resource_owner_key": self._hmac_token.text(),
+                "resource_owner_secret": self._hmac_token_secret.text(),
+                "signature_type": self.signature_type.currentText(),
+                "signature_method": self.signature_method.currentText(),
             }
         else:
             data = {
-                "signature_type": self.signature_type.get(),
-                "signature_method": self.signature_method.get(),
-                "client_key": self.client_key.get(),
-                "resource_owner_key": self.resource_owner_key.get(),
-                "rsa_key": self.rsa_key_text.get("1.0", "end-1c"),
+                "signature_type": self.signature_type.currentText(),
+                "signature_method": self.signature_method.currentText(),
+                "client_key": self._rsa_client_key.text(),
+                "resource_owner_key": self._rsa_token.text(),
+                "rsa_key": self._rsa_key_text.toPlainText(),
             }
         return data
 
 
-class AuthFrame(ttk.Frame):
+class AuthFrame(QWidget):
     def __init__(self, master=None, **kw):
-        super().__init__(master, **kw)
-        self.cpage = "noauth"
-        self.auth_type = tk.StringVar(self, value="noauth")
-        self.auth_type.trace_add("write", self.change_page)
-        frame = ttk.Frame(self)
-        ttk.Label(frame, text="Type:").grid(row=0, column=0)
-        ttk.Combobox(
-            frame,
-            values=("noauth", "base", "digest", "oauth1"),
-            textvariable=self.auth_type,
-            state="readonly",
-        ).grid(row=0, column=1)
-        frame.pack(fill="x", padx=5, pady=5)
-        self.main_frame = ttk.Frame(self)
-        ttk.Label(self.main_frame, text="This request does not use any authorization.").pack()
-        self.main_frame.pack()
-        self.username = tk.StringVar(self)
-        self.password = tk.StringVar(self)
-        self.oauth_frame = None
+        super().__init__(master)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(4, 4, 4, 4)
 
-    def change_page(self, *args):
-        if self.cpage != self.auth_type.get():
-            self.main_frame.forget()
-            if self.auth_type.get() == "oauth1":
-                self.oauth1_page()
-            elif self.auth_type.get() == "base" or self.auth_type.get() == "digest":
-                self.base_digest_page()
-            else:
-                self.no_auth_page()
-            self.cpage = self.auth_type.get()
+        row = QWidget(self)
+        h = QHBoxLayout(row)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.addWidget(QLabel("Type:", row))
+        self.auth_type = QComboBox(row)
+        self.auth_type.addItems(("noauth", "base", "digest", "oauth1"))
+        h.addWidget(self.auth_type, 1)
+        h.addStretch(2)
+        layout.addWidget(row)
 
-    def no_auth_page(self):
-        self.main_frame = ttk.Frame(self)
-        ttk.Label(self.main_frame, text="This request does not use any authorization.").pack()
-        self.main_frame.pack()
+        self.stack = QStackedWidget(self)
+        layout.addWidget(self.stack, 1)
 
-    def base_digest_page(self):
-        self.main_frame = ttk.Frame(self)
-        ttk.Label(self.main_frame, text="username:").grid(row=0, column=0)
-        ttk.Entry(self.main_frame, textvariable=self.username).grid(row=0, column=1)
-        ttk.Label(self.main_frame, text="password:").grid(row=1, column=0, pady=3)
-        ttk.Entry(self.main_frame, textvariable=self.password).grid(row=1, column=1)
-        self.main_frame.pack()
+        # noauth page
+        noauth = QWidget(self.stack)
+        nl = QVBoxLayout(noauth)
+        nl.addWidget(QLabel("This request does not use any authorization.", noauth))
+        nl.addStretch(1)
+        self.stack.addWidget(noauth)
 
-    def oauth1_page(self):
-        self.main_frame = ttk.Frame(self)
-        self.oauth_frame = OauthFrame(self.main_frame)
-        self.oauth_frame.pack(fill="both", expand=True)
-        self.main_frame.pack(fill="both", expand=True)
+        # base / digest page
+        cred = QWidget(self.stack)
+        grid = QGridLayout(cred)
+        grid.addWidget(QLabel("username:", cred), 0, 0)
+        self.username = QLineEdit(cred)
+        grid.addWidget(self.username, 0, 1)
+        grid.addWidget(QLabel("password:", cred), 1, 0)
+        self.password = QLineEdit(cred)
+        self.password.setEchoMode(QLineEdit.Password)
+        grid.addWidget(self.password, 1, 1)
+        grid.setColumnStretch(1, 1)
+        grid.setRowStretch(2, 1)
+        self.stack.addWidget(cred)
+
+        # oauth1 page
+        oauth_page = QWidget(self.stack)
+        ol = QVBoxLayout(oauth_page)
+        ol.setContentsMargins(0, 0, 0, 0)
+        self.oauth_frame = OauthFrame(oauth_page)
+        ol.addWidget(self.oauth_frame)
+        self.stack.addWidget(oauth_page)
+
+        self.auth_type.currentTextChanged.connect(self._on_type_change)
+
+    def _on_type_change(self, text):
+        if text == "oauth1":
+            self.stack.setCurrentIndex(2)
+        elif text in ("base", "digest"):
+            self.stack.setCurrentIndex(1)
+        else:
+            self.stack.setCurrentIndex(0)
 
     def get(self) -> dict:
-        res = {"type": self.auth_type.get()}
+        res = {"type": self.auth_type.currentText()}
         if res["type"] == "oauth1":
             res.update({"oauth1": self.oauth_frame.get()})
         elif res["type"] == "base":
-            res.update(
-                {
-                    "base": {
-                        "username": self.username.get(),
-                        "password": self.password.get(),
-                    }
-                }
-            )
+            res.update({"base": {"username": self.username.text(), "password": self.password.text()}})
         elif res["type"] == "digest":
-            res.update(
-                {
-                    "digest": {
-                        "username": self.username.get(),
-                        "password": self.password.get(),
-                    }
-                }
-            )
+            res.update({"digest": {"username": self.username.text(), "password": self.password.text()}})
         return res
 
     def set(self, data: dict):
-        self.auth_type.set(data.get("type", "noauth"))
-        if self.auth_type.get() == "oauth1":
+        self.auth_type.setCurrentText(data.get("type", "noauth"))
+        if self.auth_type.currentText() == "oauth1":
             self.oauth_frame.set(data.get("oauth1", {}))
-        elif self.auth_type.get() == "base":
-            self.username.set(data.get("base", {}).get("username", ""))
-            self.password.set(data.get("base", {}).get("password", ""))
-        elif self.auth_type.get() == "digest":
-            self.username.set(data.get("digest", {}).get("username", ""))
-            self.password.set(data.get("digest", {}).get("password", ""))
+        elif self.auth_type.currentText() in ("base", "digest"):
+            self.username.setText(data.get(self.auth_type.currentText(), {}).get("username", ""))
+            self.password.setText(data.get(self.auth_type.currentText(), {}).get("password", ""))
 
 
-class BodyFrame:
+class BodyFrame(QWidget):
     current_date_type = "none"
 
     def __init__(self, **kwargs) -> None:
-        self.root = ttk.Frame(kwargs.get("master"))
-        self.mode = tk.StringVar()
-        self.mode.set(self.current_date_type)
-        self.mode.trace_add("write", self.on_data_type_change)
-        self.toolbar = ttk.Frame(self.root)
-        ttk.Radiobutton(
-            self.toolbar, text="none", variable=self.mode, value="none"
-        ).pack(side="left")
-        ttk.Radiobutton(
-            self.toolbar,
-            text="urlencoded",
-            variable=self.mode,
-            value="urlencoded",
-        ).pack(side="left")
-        ttk.Radiobutton(self.toolbar, text="raw", variable=self.mode, value="raw").pack(
-            side="left"
+        super().__init__(kwargs.get("master"))
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(4)
+
+        self.current_date_type = "none"
+        self.mode = "none"
+
+        self.toolbar = QWidget(self)
+        tl = QHBoxLayout(self.toolbar)
+        tl.setContentsMargins(0, 0, 0, 0)
+        self.radio_group = QButtonGroup(self)
+        self.radio_none = QRadioButton("none", self.toolbar)
+        self.radio_url = QRadioButton("urlencoded", self.toolbar)
+        self.radio_raw = QRadioButton("raw", self.toolbar)
+        self.radio_none.setChecked(True)
+        for radio in (self.radio_none, self.radio_url, self.radio_raw):
+            self.radio_group.addButton(radio)
+            tl.addWidget(radio)
+        self.radio_group.buttonToggled.connect(self.on_data_type_change)
+
+        self.options = QComboBox(self.toolbar)
+        self.options.addItems(["Text", "JSON", "XML", "HTML"])
+        self.options.setCurrentIndex(0)
+        self.options.setVisible(False)
+        tl.addWidget(self.options)
+        tl.addStretch(1)
+
+        self.format_btn = QPushButton("格式化", self.toolbar)
+        self.format_btn.setVisible(False)
+        self.format_btn.clicked.connect(self.on_format_raw)
+        tl.addWidget(self.format_btn)
+
+        layout.addWidget(self.toolbar)
+
+        self.stack = QStackedWidget(self)
+        layout.addWidget(self.stack, 1)
+
+        # none page
+        none_page = QWidget(self.stack)
+        n = QVBoxLayout(none_page)
+        n.addWidget(QLabel("This request does not have a body", none_page))
+        n.addStretch(1)
+        self.stack.addWidget(none_page)
+
+        # urlencoded page
+        self.urlencoded_page = QWidget(self.stack)
+        ul = QVBoxLayout(self.urlencoded_page)
+        ul.setContentsMargins(0, 0, 0, 0)
+        self.edit_table = EditorTable(self.urlencoded_page, editable=True)
+        ul.addWidget(self.edit_table)
+        self.stack.addWidget(self.urlencoded_page)
+
+        # raw page
+        self.raw_page = QWidget(self.stack)
+        rl = QVBoxLayout(self.raw_page)
+        rl.setContentsMargins(0, 0, 0, 0)
+        self.scrolled_text = QPlainTextEdit(self.raw_page)
+        self.scrolled_text.setFont(self.scrolled_text.font())
+        rl.addWidget(self.scrolled_text)
+        self.stack.addWidget(self.raw_page)
+
+    def on_data_type_change(self, button, checked):
+        if not checked:
+            return
+        mode = "none" if button is self.radio_none else (
+            "urlencoded" if button is self.radio_url else "raw"
         )
-        self.toolbar.pack(fill=tk.X)
-
-        self.toolbar_right = None
-        self.main_frame = ttk.Frame(self.root)
-        ttk.Label(self.main_frame, text="This request does not have a body").pack()
-        self.main_frame.pack()
-        self.edit_table = None
-        self.options = None
-        self.scrolled_text = None
-
-    def on_data_type_change(self, *args):
-        if self.mode.get() != self.current_date_type:
-            if self.toolbar_right:
-                self.toolbar_right.forget()
-
-            if self.main_frame:
-                self.main_frame.forget()
-
-            if self.mode.get() == "none":
-                self.main_frame = ttk.Frame(self.root)
-                ttk.Label(self.main_frame, text="This request does not have a body").pack()
-                self.main_frame.pack()
-                self.current_date_type = "none"
-
-            elif self.mode.get() == "urlencoded":
-                self.show_urlencoded()
-                self.current_date_type = "urlencoded"
-
-            elif self.mode.get() == "raw":
-                self.show_raw()
-                self.current_date_type = "raw"
-
-    def show_urlencoded(self):
-        self.main_frame = ttk.Frame(self.root)
-        self.edit_table = EditorTable(self.main_frame, editable=True)
-        self.edit_table.pack(fill=tk.BOTH, expand=tk.YES)
-        self.main_frame.pack(fill=tk.BOTH, expand=tk.YES)
-
-    def show_raw(self):
-        self.toolbar_right = ttk.Frame(self.toolbar)
-        self.options = ttk.Combobox(
-            self.toolbar_right, values=["Text", "JSON", "XML", "HTML"], width=6
-        )
-        self.options.current(0)
-        self.options["state"] = "readonly"
-        self.options.pack(side="left")
-        self.toolbar_right.pack(side="left")
-
-        self.main_frame = ttk.Frame(self.root)
-        self.scrolled_text = ScrolledText(self.main_frame)
-        self.scrolled_text.pack(fill=tk.BOTH, expand=True)
-        self.main_frame.pack(fill=tk.BOTH, expand=True)
+        if mode != self.current_date_type:
+            self.current_date_type = mode
+        self.options.setVisible(mode == "raw")
+        self.format_btn.setVisible(mode == "raw")
+        if mode == "none":
+            self.stack.setCurrentIndex(0)
+        elif mode == "urlencoded":
+            self.stack.setCurrentIndex(1)
+        else:
+            self.stack.setCurrentIndex(2)
 
     def insert(self, kw):
         if kw.get("mode") == "urlencoded":
-            self.mode.set("urlencoded")
+            self.radio_url.setChecked(True)
             self.edit_table.set_data(kw.get("urlencoded"))
         elif kw.get("mode") == "raw":
-            self.mode.set("raw")
-            index = ["Text", "JSON", "XML", "HTML"].index(kw.get("options"))
-            self.options.current(index)
-            self.scrolled_text.delete("1.0", "end")
-            self.scrolled_text.insert("end", kw.get("raw"))
+            self.radio_raw.setChecked(True)
+            # An imported body can carry a preset this build does not know;
+            # fall back to Text instead of raising ValueError.
+            index = self.options.findText(kw.get("options") or "")
+            self.options.setCurrentIndex(index if index >= 0 else 0)
+            self.scrolled_text.setPlainText(kw.get("raw"))
         else:
-            self.mode.set("none")
+            self.radio_none.setChecked(True)
 
     def get(self):
         return {
-            "mode": self.mode.get(),
-            "options": self.options.get() if self.options else "",
-            "raw": self.scrolled_text.get("1.0", "end") if self.scrolled_text else "",
-            "urlencoded": self.edit_table.get_data() if self.edit_table else {},
+            "mode": self.current_date_type,
+            "options": self.options.currentText() if self.current_date_type == "raw" else "",
+            "raw": self.scrolled_text.toPlainText(),
+            "urlencoded": self.edit_table.get_data(),
         }
+
+    # ------------------------------------------------------------------
+    # Raw body formatting
+    # ------------------------------------------------------------------
+    def on_format_raw(self):
+        """Pretty-print the raw body according to the selected type."""
+        kind = self.options.currentText()
+        text = self.scrolled_text.toPlainText()
+        if not text.strip():
+            return
+        try:
+            if kind == "JSON":
+                out = json.dumps(json.loads(text), indent=2, ensure_ascii=False)
+            elif kind == "XML":
+                dom = xml.dom.minidom.parseString(text)
+                out = dom.toprettyxml(indent="  ")
+            elif kind == "HTML":
+                soup = BeautifulSoup(text, "html.parser")
+                out = soup.prettify()
+            else:  # Text — nothing to format
+                return
+        except Exception as error:
+            show_warning(self, "Format", f"Cannot format as {kind}.\n{error}")
+            return
+        self.scrolled_text.setPlainText(out)
+
+
+class PathLabel(QLabel):
+    doubleClicked = pyqtSignal()
+
+    def mouseDoubleClickEvent(self, event):
+        self.doubleClicked.emit()
+        super().mouseDoubleClickEvent(event)
 
 
 class RequestWindow:
@@ -466,115 +486,152 @@ class RequestWindow:
 
     def __init__(self, **kwargs):
         self.root = kwargs.get("window")
-        window = ttk.Frame(self.root)
-        window.pack(fill='both', expand=tk.YES, padx=5, pady=5)
+        # These are per-window state, so they belong on the instance: leaving
+        # them as class attributes means every unsaved request tab shares (and
+        # can overwrite) the same identity.
+        self.item_id = None
+        self.data_id = None
+        self.data_name = 'New Request'
+        self.data_path = ''
+        layout = QVBoxLayout(self.root)
+        layout.setContentsMargins(5, 5, 5, 5)
+        layout.setSpacing(4)
+
         self.get_script = kwargs.get("get_script")
         self.env_variable = kwargs.get("env_variable")
-        self.glb_variable = kwargs.get('glb_variable')
+        self.glb_variable = kwargs.get("glb_variable")
         self.local_variable = kwargs.get("local_variable")
-        self.cache_history = kwargs.get('cache_history')
-        self.save_item = kwargs.get('save_item')
+        self.cache_history = kwargs.get("cache_history")
+        self.save_item = kwargs.get("save_item")
         self.callback = kwargs.get("callback")
-        self.data_path = kwargs.get('path', '')
-        self.filepath = tk.StringVar(value=self.data_path + self.data_name)
+        self.data_path = kwargs.get("path", "")
+        self.filepath = self.data_path + self.data_name
 
-        ff = ttk.Frame(window)
-        ff.pack(fill=tk.X)
-        path_label = ttk.Label(ff, textvariable=self.filepath, cursor="hand2")
-        path_label.pack(side=tk.LEFT)
-        path_label.bind("<Double-1>", lambda e: self.on_rename())
-        save_btn = ttk.Button(ff, text="Save", command=self.save_handler, bootstyle="primary")
-        save_btn.pack(side=tk.RIGHT)
+        # ---- path / save bar ----
+        ff = QWidget(self.root)
+        fl = QHBoxLayout(ff)
+        fl.setContentsMargins(0, 0, 0, 0)
+        self.path_label = PathLabel(self.filepath, ff)
+        self.path_label.setCursor(Qt.PointingHandCursor)
+        self.path_label.doubleClicked.connect(self.on_rename)
+        fl.addWidget(self.path_label)
+        fl.addStretch(1)
+        save_btn = QPushButton("Save", ff)
+        style_role(save_btn, "primary")
+        save_btn.clicked.connect(self.save_handler)
+        fl.addWidget(save_btn)
+        layout.addWidget(ff)
 
-        north = ttk.Frame(window)
-        north.pack(fill=tk.X)
-        # Create request mode drop-down box and URL input box
-        self.method_box = ttk.Combobox(north, width=8, values=self.method_list)
-        self.method_box.current(0)
-        self.method_box["state"] = "readonly"
-        self.method_box.pack(side=tk.LEFT)
-        sub_btn = ttk.Button(north, text="Send", bootstyle="success")  # Send request button
-        sub_btn.config(command=self.send_request)  # Bind the event handler to send the request button
-        sub_btn.pack(side=tk.RIGHT)
-        self.url = tk.StringVar()
-        self.url.trace("w", self.change_url)
-        url_box = ttk.Entry(north, textvariable=self.url)
-        url_box.pack(fill=tk.BOTH, pady=3)
+        # ---- method / url / send ----
+        north = QWidget(self.root)
+        nl = QHBoxLayout(north)
+        nl.setContentsMargins(0, 0, 0, 0)
+        self.method_box = QComboBox(north)
+        self.method_box.addItems(self.method_list)
+        self.method_box.setCurrentIndex(0)
+        self.method_box.setFixedWidth(96)
+        nl.addWidget(self.method_box)
+        self.url = QLineEdit(north)
+        self.url.textChanged.connect(self.change_url)
+        nl.addWidget(self.url, 1)
+        sub_btn = QPushButton("Send", north)
+        style_role(sub_btn, "success")
+        sub_btn.clicked.connect(self.send_request)
+        nl.addWidget(sub_btn)
+        layout.addWidget(north)
 
-        # Create a PanedWindow
-        paned_window = ttk.Panedwindow(window, orient=tk.VERTICAL)
-        paned_window.pack(fill=tk.BOTH, expand=tk.YES)
+        # ---- splitter: request | response ----
+        paned_window = QSplitter(Qt.Vertical, self.root)
+        layout.addWidget(paned_window, 1)
 
-        # Create notebook
-        notebook = ttk.Notebook(paned_window)
-        paned_window.add(notebook, weight=1)
-
-        # Create a query parameter page
-        self.params_frame = ParamsFrame(
-            master=notebook, editable=True, cb=self.update_url
-        )
-        notebook.add(self.params_frame, text="Params")
+        notebook = QTabWidget(paned_window)
+        self.params_frame = ParamsFrame(master=notebook, editable=True, cb=self.update_url)
+        notebook.addTab(self.params_frame, "Params")
         self.auth_frame = AuthFrame(master=notebook)
-        notebook.add(self.auth_frame, text="Authorization")
-        # Create the request header page
+        notebook.addTab(self.auth_frame, "Authorization")
         self.headers_frame = EditorTable(master=notebook, editable=True)
-        notebook.add(self.headers_frame, text="Headers")
-
-        # Create the request body page
+        notebook.addTab(self.headers_frame, "Headers")
         self.body_box = BodyFrame(master=notebook)
-        notebook.add(self.body_box.root, text="Body")
-
-        # pre-request script
+        notebook.addTab(self.body_box, "Body")
         self.script_box = CodeEditor(notebook)
-        notebook.add(self.script_box, text="Pre-request Script")
-
-        # tests
+        notebook.addTab(self.script_box, "Pre-request Script")
         self.tests_box = CodeEditor(notebook)
-        notebook.add(self.tests_box, text="Post-response Script")
+        notebook.addTab(self.tests_box, "Post-response Script")
+        paned_window.addWidget(notebook)
 
-        # Create response area
-        res_note = ttk.Notebook(paned_window)
-        paned_window.add(res_note, weight=1)
+        # response area
+        res_note = QTabWidget(paned_window)
 
-        self.res_body_box = ScrolledText(res_note)
-        res_note.add(self.res_body_box, text="Body")
+        # The Body tab holds the source view plus the Preview action, which
+        # only means anything for an HTML response, so _display_response
+        # reveals the whole bar or leaves it hidden.
+        body_page = QWidget(res_note)
+        body_layout = QVBoxLayout(body_page)
+        body_layout.setContentsMargins(0, 0, 0, 0)
+        body_layout.setSpacing(2)
+        self.preview_bar = QWidget(body_page)
+        preview_layout = QHBoxLayout(self.preview_bar)
+        preview_layout.setContentsMargins(2, 2, 2, 0)
+        preview_layout.addStretch(1)
+        self.preview_btn = QPushButton("预览", self.preview_bar)
+        self.preview_btn.setToolTip(webview.describe_backend())
+        self.preview_btn.clicked.connect(self.open_html_preview)
+        preview_layout.addWidget(self.preview_btn)
+        self.preview_bar.setVisible(False)
+        body_layout.addWidget(self.preview_bar)
 
+        self.res_body_box = QPlainTextEdit(body_page)
+        self.res_body_box.setReadOnly(True)
+        body_layout.addWidget(self.res_body_box, 1)
+        res_note.addTab(body_page, "Body")
+
+        # Last HTML response, kept for the preview window (set by
+        # _display_response).
+        self.preview_html = None
+        self.preview_base_url = ""
+        self.preview_window = None
         self.res_cookie_table = EditorTable(res_note)
-        res_note.add(self.res_cookie_table, text="Cookies")
-
+        res_note.addTab(self.res_cookie_table, "Cookies")
         self.res_header_table = EditorTable(res_note)
-        res_note.add(self.res_header_table, text="Headers")
-
+        res_note.addTab(self.res_header_table, "Headers")
         self.res_tests_box = ConsoleText(res_note)
-        res_note.add(self.res_tests_box, text="Console")
+        res_note.addTab(self.res_tests_box, "Console")
+        paned_window.addWidget(res_note)
 
+        paned_window.setStretchFactor(0, 3)
+        paned_window.setStretchFactor(1, 2)
+
+    # ------------------------------------------------------------------
+    # Rename / save
+    # ------------------------------------------------------------------
     def on_rename(self):
         if self.data_id is None:
-            messagebox.showwarning("Warning", "Please save it first.")
+            show_warning(self.root, "Warning", "Please save it first.")
             return
-        name = simpledialog.askstring("Rename", "Enter new name:", initialvalue=self.data_name, parent=self.root)
+        name = ask_string(self.root, "Rename", "Enter new name:", self.data_name)
         if name is not None:
             update_request(**{"id": self.data_id, "name": name})
             self.data_name = name
-            self.filepath.set(self.data_path + self.data_name)
+            self.filepath = self.data_path + self.data_name
+            self.path_label.setText(self.filepath)
             self.save_item(self.item_id, {'name': name})
             self.callback(name=name, item_id=self.item_id)
 
     def save_handler(self):
         """Save test script"""
         name = self.data_name
-        method = self.method_box.get()
-        url = self.url.get()
+        method = self.method_box.currentText()
+        url = self.url.text()
         params = self.params_frame.get_data()
         headers = self.headers_frame.get_data()
         body = self.body_box.get()
-        pre_request_script = self.script_box.get("1.0", tk.END)
-        tests = self.tests_box.get("1.0", tk.END)
+        pre_request_script = self.script_box.toPlainText()
+        tests = self.tests_box.toPlainText()
         opt_auth = self.auth_frame.get()
         pre_request_script = pre_request_script.rstrip("\n")
         tests = tests.rstrip("\n")
 
-        if name == "" and url > "":
+        if name == "" and url:
             name = url
         elif name == "":
             name = "New Request"
@@ -608,21 +665,92 @@ class RequestWindow:
 
     def fill_blank(self, data):
         self.data_id = data.get("id")
-        self.method_box.current(self.method_list.index(data.get("method", "GET")))
-        self.url.set(data.get("url", ""))
+        method = data.get("method", "GET")
+        # Imported collections / old history rows can hold a verb this build
+        # does not offer; a bare list.index() raised ValueError and the request
+        # could not be opened at all.
+        self.method_box.setCurrentIndex(
+            self.method_list.index(method) if method in self.method_list else 0
+        )
+        self.url.setText(data.get("url", ""))
         self.headers_frame.set_data(data.get("headers", {}))
         self.body_box.insert(data.get("body", {}))
-        self.script_box.delete("1.0", tk.END)
-        self.script_box.insert(tk.END, data.get("pre_script", ""))
-        self.tests_box.delete("1.0", tk.END)
-        self.tests_box.insert(tk.END, data.get("post_script", ""))
+        self.script_box.setPlainText(data.get("pre_script", ""))
+        self.tests_box.setPlainText(data.get("post_script", ""))
         self.data_name = data.get("name", "New Request")
-        self.filepath.set(self.data_path + self.data_name)
+        self.filepath = self.data_path + self.data_name
+        self.path_label.setText(self.filepath)
         self.auth_frame.set(data.get("auth", {}))
 
+    # ------------------------------------------------------------------
+    # Sending
+    # ------------------------------------------------------------------
     def send_request(self):
-        thread = threading.Thread(target=self.http_handle)
+        spec = self._collect_request_spec()
+        if spec is None:
+            return
+        thread = threading.Thread(target=self.http_handle, args=(spec,), daemon=True)
         thread.start()
+
+    def _collect_request_spec(self):
+        """Read all widget state and resolve variables on the UI thread."""
+        method = self.method_box.currentText()
+        url = self.url.text()
+        if url is None or url == "":
+            show_error(self.root, "Error", "Please enter the request address")
+            return None
+
+        url = self.fill_var(url)
+
+        headers = self.headers_frame.get_data()
+        headers = json.dumps(headers)
+        headers = self.fill_var(headers)
+        try:
+            headers = json.loads(headers)
+        except json.JSONDecodeError:
+            headers = {}
+
+        req_options = self.body_box.get()
+        if req_options.get("mode") == "raw":
+            body = req_options.get("raw")
+        elif req_options.get("mode") == "urlencoded":
+            body = json.dumps(req_options.get("urlencoded"))
+        else:
+            body = ""
+        body = self.fill_var(body)
+
+        if req_options.get("mode") == "urlencoded" or (
+                req_options.get("mode") == "raw" and req_options.get("options") == "JSON"):
+            try:
+                body = json.loads(body)
+            except json.JSONDecodeError:
+                body = {}
+
+        pre_request_script = self.script_box.toPlainText()
+        tests = self.tests_box.toPlainText()
+        opt_auth = self.auth_frame.get()
+        for key in opt_auth.keys():
+            if isinstance(opt_auth[key], dict):
+                for ckey in opt_auth[key]:
+                    temp = opt_auth[key][ckey]
+                    temp = self.fill_var(temp)
+                    opt_auth[key][ckey] = temp
+
+        script_list = []
+        if self.item_id is not None:
+            script_list = self.get_script(self.item_id) or []
+
+        return {
+            "method": method,
+            "url": url,
+            "headers": headers,
+            "body": body,
+            "options": req_options,
+            "pre_request_script": pre_request_script,
+            "tests": tests,
+            "auth": opt_auth,
+            "script_list": script_list,
+        }
 
     def fill_var(self, data):
         varlist = re.finditer(r"\{\{[^{}]*\}\}", data)
@@ -634,54 +762,19 @@ class RequestWindow:
                 data = data.replace(var.group(), val)
         return data
 
-    def http_handle(self):
-        """Define the function that sends the request"""
+    def http_handle(self, spec):
+        """Define the function that sends the request (runs in a worker thread)."""
         console = Console(self.res_tests_box)
-        # Gets the request method and URL
-        method = self.method_box.get()
-        url = self.url.get()
-        if url is None or url == "":
-            messagebox.showerror("Error", "Please enter the request address")
-            return
+        method = spec["method"]
+        url = spec["url"]
+        headers = dict(spec["headers"])
+        body = spec["body"]
+        req_options = spec["options"]
+        opt_auth = spec["auth"]
+        pre_request_script = spec["pre_request_script"]
+        tests = spec["tests"]
+        script_list = spec["script_list"]
 
-        url = self.fill_var(url)
-
-        # Gets query parameters, request headers, and request bodies
-        headers = self.headers_frame.get_data()
-        headers = json.dumps(headers)
-        headers = self.fill_var(headers)
-        headers = json.loads(headers)
-
-        req_options = self.body_box.get()
-        if req_options.get("mode") == "raw":
-            body = req_options.get("raw")
-        elif req_options.get("mode") == "urlencoded":
-            body = req_options.get("urlencoded")
-            body = json.dumps(body)
-        else:
-            body = ""
-        body = self.fill_var(body)
-
-        if req_options.get("mode") == "urlencoded" or (req_options.get("mode") == "raw" and req_options.get("options") == "JSON"):
-            try:
-                body = json.loads(body)
-            except json.JSONDecodeError:
-                body = {}
-
-        if self.item_id is not None:
-            script_list = self.get_script(self.item_id)
-        else:
-            script_list = []
-
-        pre_request_script = self.script_box.get("1.0", tk.END)
-        tests = self.tests_box.get("1.0", tk.END)
-        opt_auth = self.auth_frame.get()
-        for item in opt_auth.keys():
-            if isinstance(opt_auth[item], dict):
-                for citem in opt_auth[item]:
-                    temp = opt_auth[item][citem]
-                    temp = self.fill_var(temp)
-                    opt_auth[item][citem] = temp
         auth = None
         if opt_auth["type"] == "base":
             auth = HTTPBasicAuth(opt_auth["base"]["username"], opt_auth["base"]["password"])
@@ -711,35 +804,51 @@ class RequestWindow:
                     signature_type=opt_auth["oauth1"]["signature_type"],
                 )
 
-        try:
-            exec(pre_request_script, {
-                "req": {"body": body, "headers": headers, "url": url},
+        # ``req`` is exposed to the scripts as the request being built, and the
+        # built-in help documents assigning to it ("req['body']['username'] =
+        # 'x'").  A fresh literal per exec() meant such writes were thrown away
+        # (in-place edits to the shared body/headers dicts happened to leak
+        # through; rebinding req["url"] never did).  One dict is reused and its
+        # contents are copied back below.
+        req_data = {"body": body, "headers": headers, "url": url}
+
+        def _script_scope():
+            return {
+                "req": req_data,
                 "globals": self.glb_variable,
                 "collectionVariables": lambda x: self.local_variable(self.item_id, x),
                 "environment": self.env_variable,
-                "console": console
-            })
+                "console": console,
+            }
+
+        try:
+            exec(pre_request_script, _script_scope())
         except Exception as error:
             console.error(str(error))
 
         for script in script_list:
             try:
-                exec(script["pre_request_script"], {
-                    "req": {"body": body, "headers": headers, "url": url},
-                    "globals": self.glb_variable,
-                    "collectionVariables": lambda x: self.local_variable(self.item_id, x),
-                    "environment": self.env_variable,
-                    "console": console
-                })
+                exec(script["pre_request_script"], _script_scope())
             except Exception as error:
                 console.error(str(error))
+
+        if isinstance(req_data.get("url"), str):
+            url = req_data["url"]
+        if isinstance(req_data.get("headers"), dict):
+            headers = req_data["headers"]
+        if "body" in req_data:
+            body = req_data["body"]
+
         start_time = time.time()
 
         if req_options.get("mode") == "urlencoded":
             headers.update({"Content-Type": "application/x-www-form-urlencoded"})
         elif req_options.get("mode") == "raw":
             if req_options.get("options") == "JSON":
-                body = json.dumps(body)
+                # A pre-request script may already have produced the JSON text;
+                # serialising a str again would send a quoted string.
+                if not isinstance(body, str):
+                    body = json.dumps(body)
                 headers.update({"Content-Type": "application/json"})
             elif req_options.get("options") == "Text":
                 headers.update({"Content-Type": "text/plain"})
@@ -765,22 +874,27 @@ class RequestWindow:
             elif method == "OPTIONS":
                 response = requests.options(url, headers=headers, auth=auth)
             else:
-                messagebox.showerror("Error", "Unsupported request type")
+                qui.post(lambda: show_error(self.root, "Error", "Unsupported request type"))
                 return
         except requests.exceptions.MissingSchema:
-            messagebox.showerror("Error", "Request error")
+            qui.post(lambda: show_error(self.root, "Error", "Request error"))
             return
         except requests.exceptions.SSLError:
-            messagebox.showerror("Error", "SSL certificate verify failed")
+            qui.post(lambda: show_error(self.root, "Error", "SSL certificate verify failed"))
             return
         except requests.exceptions.ConnectionError:
-            messagebox.showerror("Error", "Connection refused")
+            qui.post(lambda: show_error(self.root, "Error", "Connection refused"))
             return
         except requests.exceptions.Timeout:
-            messagebox.showerror("Error", "Request timeout")
+            qui.post(lambda: show_error(self.root, "Error", "Request timeout"))
             return
         except requests.exceptions.RequestException as error:
-            messagebox.showerror("Error", str(error))
+            # ``error`` is unbound by the time the lambda runs: Python deletes
+            # the ``except ... as`` name at the end of the block, so the closure
+            # raised NameError instead of reporting the failure.  Capture the
+            # text now and let the lambda close over the string.
+            message = str(error)
+            qui.post(lambda: show_error(self.root, "Error", message))
             return
 
         cost_time = time.time() - start_time
@@ -788,31 +902,12 @@ class RequestWindow:
             cost_time = f"{round(cost_time * 1000)}ms"
         else:
             cost_time = f"{round(cost_time)}s"
-        # 将响应显示在响应区域
-        self.res_cookie_table.clear_data()
-        self.res_cookie_table.set_data(dict(response.cookies))
-        self.res_header_table.clear_data()
-        self.res_header_table.set_data(dict(response.headers))
-        content_type = response.headers.get("Content-Type")
 
-        self.res_body_box.delete("1.0", tk.END)
-        if "application/json" in content_type:
-            self.res_body_box.insert(tk.END, json.dumps(response.json(), indent=2, ensure_ascii=False))
-        elif "text/html" in content_type:
-            response.encoding = "utf-8"
-            soup = BeautifulSoup(response.text, "html.parser")
-            self.res_body_box.insert(tk.END, soup.prettify())
-        elif "text/xml" in content_type or "application/xml" in content_type:
-            response.encoding = "utf-8"
-            dom = xml.dom.minidom.parseString(response.text)
-            self.res_body_box.insert(tk.END, dom.toprettyxml(indent="  "))
-        elif "image" in content_type:
-            data_stream = BytesIO(response.content)
-            pil_image = Image.open(data_stream)
-            tk_image = ImageTk.PhotoImage(pil_image)
-            self.res_body_box.image_create(tk.END, image=tk_image)
-        else:
-            self.res_body_box.insert(tk.END, response.text)
+        # 将响应显示在响应区域 (UI thread)
+        response_body = self._prepare_response_body(response)
+        qui.post(lambda: self._display_response(response_body, dict(response.cookies),
+                                                dict(response.headers),
+                                                response.status_code, method, url, cost_time))
 
         console.info(f"{method} {url} {response.status_code} {cost_time}")
         try:
@@ -838,21 +933,130 @@ class RequestWindow:
             except Exception as error:
                 console.error(str(error))
 
-        self.cache_history({
-                    "method": method,
-                    "url": url,
-                    "params": self.get_params(),
-                    "headers": headers,
-                    "body": req_options,
-                    "pre_request_script": pre_request_script,
-                    "tests": tests,
-                    "auth": opt_auth,
-        })
-        if self.item_id is not None:
-            self.save_handler()
+        def finish():
+            self.cache_history({
+                "method": method,
+                "url": url,
+                "params": self.get_params(),
+                "headers": headers,
+                "body": req_options,
+                "pre_request_script": pre_request_script,
+                "tests": tests,
+                "auth": opt_auth,
+            })
+            if self.item_id is not None:
+                self.save_handler()
+
+        qui.post(finish)
+
+    def _prepare_response_body(self, response):
+        """Compute what the Body tab shows (runs in the worker thread).
+
+        Returns a dict:
+          kind      -- "text" or "image"
+          payload   -- the text to display, or a PIL image
+          html      -- the raw HTML document when the response is a web page,
+                       otherwise None; it is what the Preview button renders
+          base_url  -- the URL relative links in that document resolve against
+        """
+        content_type = (response.headers.get("Content-Type") or "").lower()
+        # A server that sends no Content-Type at all can still return a web
+        # page; without this the Preview button would be lost on it.  The sniff
+        # reads the raw bytes rather than response.text, which would decode the
+        # whole body (an untyped response is often a large binary download).
+        if not content_type:
+            head = response.content[:512].lstrip().lower()
+            if head.startswith(b"<!doctype html") or head.startswith(b"<html"):
+                content_type = "text/html"
+
+        if "application/json" in content_type:
+            try:
+                payload = json.dumps(response.json(), indent=2, ensure_ascii=False)
+            except Exception:
+                payload = response.text
+            return {"kind": "text", "payload": payload, "html": None, "base_url": ""}
+        elif "text/html" in content_type or "application/xhtml+xml" in content_type:
+            response.encoding = "utf-8"
+            html = response.text
+            return {
+                "kind": "text",
+                # The source view gets indented markup, but the preview keeps
+                # the original text: re-indenting can change how
+                # whitespace-sensitive markup (pre, textarea) renders.
+                "payload": BeautifulSoup(html, "html.parser").prettify(),
+                "html": html,
+                "base_url": response.url,
+            }
+        elif "text/xml" in content_type or "application/xml" in content_type:
+            response.encoding = "utf-8"
+            try:
+                payload = xml.dom.minidom.parseString(response.text).toprettyxml(indent="  ")
+            except Exception:
+                payload = response.text
+            return {"kind": "text", "payload": payload, "html": None, "base_url": ""}
+        elif "image" in content_type:
+            try:
+                payload = Image.open(BytesIO(response.content))
+                return {"kind": "image", "payload": payload, "html": None, "base_url": ""}
+            except Exception:
+                return {
+                    "kind": "text",
+                    "payload": response.content[:4096].decode("utf-8", errors="replace"),
+                    "html": None,
+                    "base_url": "",
+                }
+        else:
+            return {"kind": "text", "payload": response.text, "html": None, "base_url": ""}
+
+    def _display_response(self, body, cookies, headers, status_code, method, url, cost_time):
+        self.res_cookie_table.clear_data()
+        self.res_cookie_table.set_data(cookies)
+        self.res_header_table.clear_data()
+        self.res_header_table.set_data(headers)
+
+        self.res_body_box.clear()
+        if body["kind"] == "image":
+            qimage = qui.pil_to_qimage(body["payload"])
+            cursor = self.res_body_box.textCursor()
+            cursor.movePosition(cursor.End)
+            cursor.insertImage(qimage)
+            self.res_body_box.setTextCursor(cursor)
+        else:
+            self.res_body_box.setPlainText(body["payload"])
+        self._set_preview(body.get("html"), body.get("base_url"))
+
+    # ------------------------------------------------------------------
+    # HTML preview
+    # ------------------------------------------------------------------
+    def _set_preview(self, html, base_url):
+        """Offer the Preview button only while the response is HTML."""
+        self.preview_html = html
+        self.preview_base_url = base_url or ""
+        self.preview_bar.setVisible(bool(html))
+        if not html and self.preview_window is not None:
+            # The preview shows the response currently on screen, so a new,
+            # non-HTML response makes it stale — close it instead of leaving
+            # the previous page up.
+            self.preview_window.hide()
+
+    def open_html_preview(self):
+        """Render the last HTML response in the preview window."""
+        if not self.preview_html:
+            return
+        title = f"Preview - {self.data_name}"
+        if self.preview_window is None:
+            self.preview_window = webview.HtmlPreviewWindow(
+                self.root, title=title, html=self.preview_html,
+                base_url=self.preview_base_url)
+        else:
+            self.preview_window.setWindowTitle(title)
+            self.preview_window.set_content(self.preview_html, self.preview_base_url)
+        self.preview_window.show()
+        self.preview_window.raise_()
+        self.preview_window.activateWindow()
 
     def get_params(self):
-        x = urllib.parse.urlparse(self.url.get())
+        x = urllib.parse.urlparse(self.url.text())
         y = urllib.parse.parse_qs(x.query, keep_blank_values=True)
         data = {}
         for item in y.keys():
@@ -867,76 +1071,10 @@ class RequestWindow:
         self.params_frame.set_data(self.get_params())
 
     def update_url(self, query: str):
-        x = urllib.parse.urlparse(self.url.get())
+        x = urllib.parse.urlparse(self.url.text())
         scheme = x.scheme
         netloc = x.netloc
         path = x.path
         params = x.params
         fragment = x.fragment
-        self.url.set(urllib.parse.urlunparse((scheme, netloc, path, params, query, fragment)))
-
-
-class ConsoleText(ScrolledText):
-    def __init__(self, master=None, **kw):
-        super().__init__(master, **kw)
-
-        if platform.system() == "Darwin":
-            self.bind("<Control-Button-1>", self.on_right_click)
-            self.bind("<Button-2>", self.on_right_click)
-        else:
-            self.bind("<Button-3>", self.on_right_click)
-
-    def on_right_click(self, event):
-        menu = tk.Menu(self, tearoff=0)
-        menu.add_command(label="Clear", command=self.on_clear)
-        menu.post(event.x_root, event.y_root)
-
-    def on_clear(self):
-        self.delete("1.0", tk.END)
-
-
-class Console:
-    def __init__(self, text: ScrolledText):
-        self.text = text
-
-    @staticmethod
-    def to_string(*args) -> str:
-        temp = ""
-        for item in args:
-            if isinstance(item, (str, int, float)):
-                temp += f"{item} "
-            elif isinstance(item, (dict, list)):
-                temp += f"{json.dumps(item, indent=4, ensure_ascii=False)}"
-            elif isinstance(item, bytes):
-                temp += f"{item.decode()}"
-            else:
-                temp += str(temp)
-        return temp
-
-    def log(self, *args):
-        self.text.insert(tk.END, self.to_string(*args))
-        self.text.insert(tk.END, "\n")
-
-    def info(self, *args):
-        self.text.insert(tk.END, self.to_string(*args))
-        line_start = self.text.index("insert linestart")
-        line_end = self.text.index("insert lineend")
-        self.text.tag_config("error", foreground="blue")
-        self.text.tag_add("error", line_start, line_end)
-        self.text.insert(tk.END, "\n")
-
-    def error(self, *args):
-        self.text.insert(tk.END, self.to_string(*args))
-        line_start = self.text.index("insert linestart")
-        line_end = self.text.index("insert lineend")
-        self.text.tag_config("error", foreground="red")
-        self.text.tag_add("error", line_start, line_end)
-        self.text.insert(tk.END, "\n")
-
-    def warning(self, *args):
-        self.text.insert(tk.END, self.to_string(*args))
-        line_start = self.text.index("insert linestart")
-        line_end = self.text.index("insert lineend")
-        self.text.tag_config("warning", foreground="orange")
-        self.text.tag_add("warning", line_start, line_end)
-        self.text.insert(tk.END, "\n")
+        self.url.setText(urllib.parse.urlunparse((scheme, netloc, path, params, query, fragment)))

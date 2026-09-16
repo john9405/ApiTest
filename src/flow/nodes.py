@@ -8,15 +8,31 @@ Each node type extends BaseNode and provides:
 
 import json
 import re
-import threading
 import time
-import tkinter as tk
-import ttkbootstrap as ttk
-from tkinter.scrolledtext import ScrolledText
+
+from PyQt5.QtCore import Qt
+from PyQt5.QtWidgets import (
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QGridLayout,
+    QLabel,
+    QLineEdit,
+    QPlainTextEdit,
+    QComboBox,
+    QRadioButton,
+    QButtonGroup,
+    QPushButton,
+    QDialog,
+    QTreeWidget,
+    QTreeWidgetItem,
+    QDoubleSpinBox,
+)
 
 import requests
 
 from ..utils import CodeEditor
+from ..theme import style_role
 
 
 class Port:
@@ -51,13 +67,14 @@ class BaseNode:
         raise NotImplementedError
 
     def get_config_frame(self, master, on_change=None, **kwargs):
-        """Return a ttk.Frame with configuration widgets.
+        """Return a QWidget with configuration widgets.
 
         on_change: callback to notify the inspector when config changes
         Extra kwargs are forwarded for type-specific needs (e.g. get_collection_requests).
         """
-        frame = ttk.Frame(master)
-        ttk.Label(frame, text=f"No configuration needed for {self.DISPLAY_NAME}.").pack(padx=5, pady=10)
+        frame = QWidget(master)
+        layout = QVBoxLayout(frame)
+        layout.addWidget(QLabel(f"No configuration needed for {self.DISPLAY_NAME}.", frame))
         return frame
 
     def validate_config(self):
@@ -164,89 +181,101 @@ class ApiRequestNode(BaseNode):
     def get_config_frame(self, master, on_change=None, **kwargs):
         from ..dao.crud import list_all_requests
 
-        frame = ttk.Frame(master)
-        frame.columnconfigure(1, weight=1)
+        frame = QWidget(master)
+        layout = QGridLayout(frame)
+        layout.setContentsMargins(2, 2, 2, 2)
+        layout.setHorizontalSpacing(6)
+        layout.setVerticalSpacing(4)
 
         row = 0
 
         # ---- Source toggle ----
-        ttk.Label(frame, text="Source:").grid(row=row, column=0, sticky="w", padx=2, pady=2)
-        source_var = tk.StringVar(value=self.model.config.get("source", "inline"))
-        source_frame = ttk.Frame(frame)
-        source_frame.grid(row=row, column=1, sticky="ew", padx=2, pady=2)
-        ttk.Radiobutton(source_frame, text="Inline", variable=source_var, value="inline").pack(side=tk.LEFT)
-        ttk.Radiobutton(source_frame, text="From Collection", variable=source_var, value="collection").pack(side=tk.LEFT, padx=(8, 0))
+        layout.addWidget(QLabel("Source:", frame), row, 0)
+        source_frame = QWidget(frame)
+        sh = QHBoxLayout(source_frame)
+        sh.setContentsMargins(0, 0, 0, 0)
+        radio_inline = QRadioButton("Inline", source_frame)
+        radio_collection = QRadioButton("From Collection", source_frame)
+        radio_inline.setChecked(self.model.config.get("source", "inline") != "collection")
+        radio_collection.setChecked(self.model.config.get("source") == "collection")
+        group = QButtonGroup(source_frame)
+        group.addButton(radio_inline)
+        group.addButton(radio_collection)
+        sh.addWidget(radio_inline)
+        sh.addWidget(radio_collection)
+        sh.addStretch(1)
+        layout.addWidget(source_frame, row, 1)
 
-        # ---- Collection request picker (shown when source == 'collection') ----
-        picker_frame = ttk.Frame(frame)
-        picker_frame.grid(row=row + 1, column=0, columnspan=2, sticky="ew", padx=2, pady=2)
-        picker_frame.columnconfigure(1, weight=1)
+        def _notify_change():
+            if on_change:
+                on_change()
 
-        ttk.Label(picker_frame, text="Request:").grid(row=0, column=0, sticky="w", padx=2, pady=2)
+        def on_source_toggled(_checked=None):
+            self.model.config["source"] = "collection" if radio_collection.isChecked() else "inline"
+            picker_frame.setVisible(radio_collection.isChecked())
+            inline_fields.setVisible(not radio_collection.isChecked())
+            if radio_collection.isChecked():
+                _populate_requests()
+            _notify_change()
 
-        # Read-only display entry + browse button
-        selected_display = tk.StringVar(value="")
-        request_entry = ttk.Entry(picker_frame, textvariable=selected_display, state="readonly")
-        request_entry.grid(row=0, column=1, sticky="ew", padx=2, pady=2)
-        browse_btn = ttk.Button(picker_frame, text="...", width=3,
-                                command=lambda: _show_tree_popup())
-        browse_btn.grid(row=0, column=2, sticky="e", padx=(1, 2))
+        radio_inline.toggled.connect(on_source_toggled)
+        radio_collection.toggled.connect(on_source_toggled)
+        row += 1
 
-        # Store request list and picker state
+        # ---- Collection request picker ----
+        picker_frame = QWidget(frame)
+        ph = QHBoxLayout(picker_frame)
+        ph.setContentsMargins(0, 0, 0, 0)
+        ph.addWidget(QLabel("Request:", picker_frame))
+        selected_display = QLineEdit(picker_frame)
+        selected_display.setReadOnly(True)
+        ph.addWidget(selected_display, 1)
+        browse_btn = QPushButton("...", picker_frame)
+        browse_btn.setFixedWidth(34)
+        ph.addWidget(browse_btn)
+        layout.addWidget(picker_frame, row, 0, 1, 2)
+        row += 1
+
         self._request_list = []
-        self._picker_frame = picker_frame
-        self._selected_display = selected_display
+        self._popup_result = None
 
         def _populate_requests():
-            """Load all requests from the database and group by folder path."""
             self._request_list = []
             try:
                 self._request_list = list_all_requests()
             except Exception:
                 self._request_list = []
-            # Update display for the currently selected request
             _refresh_display()
 
         def _refresh_display():
-            """Update the entry to show the currently selected request."""
             saved_id = self.model.config.get("request_id")
             for req in self._request_list:
                 if req["id"] == saved_id:
                     path = req.get("path", "")
                     if path:
-                        selected_display.set(f"{req['method']} {req['name']}  [{path}]")
+                        selected_display.setText(f"{req['method']} {req['name']}  [{path}]")
                     else:
-                        selected_display.set(f"{req['method']} {req['name']}")
+                        selected_display.setText(f"{req['method']} {req['name']}")
                     return
-            selected_display.set("")
+            selected_display.setText("")
 
         def _save_selection(req):
-            """Store the selected request id and update display."""
             self.model.config["request_id"] = req["id"]
             _refresh_display()
-            if on_change:
-                on_change()
+            _notify_change()
 
         def _show_tree_popup():
-            """Open a popup dialog with requests grouped by folder."""
-            popup = tk.Toplevel(picker_frame)
-            popup.title("Select Request")
-            popup.geometry("500x380")
-            popup.transient(picker_frame.winfo_toplevel())
-            popup.grab_set()
-
-            # Treeview
-            tree = ttk.Treeview(popup, show="tree", selectmode="browse")
-            tree.pack(fill=tk.BOTH, expand=True, padx=8, pady=(8, 4))
-            tree.heading("#0", text="Requests")
-
-            # Scrollbar
-            scroll = ttk.Scrollbar(tree, orient=tk.VERTICAL, command=tree.yview)
-            tree.configure(yscrollcommand=scroll.set)
-            scroll.pack(side=tk.RIGHT, fill=tk.Y)
+            dlg = QDialog(picker_frame)
+            dlg.setWindowTitle("Select Request")
+            dlg.resize(500, 380)
+            vl = QVBoxLayout(dlg)
+            tree = QTreeWidget(dlg)
+            tree.setHeaderLabels(["Requests"])
+            tree.setSelectionMode(QTreeWidget.SingleSelection)
+            vl.addWidget(tree, 1)
 
             # Group requests by folder path
-            groups = {}  # path -> list of requests
+            groups = {}
             ungrouped = []
             for req in self._request_list:
                 path = req.get("path", "")
@@ -255,178 +284,153 @@ class ApiRequestNode(BaseNode):
                 else:
                     ungrouped.append(req)
 
-            # Sort groups by path
-            sorted_paths = sorted(groups.keys())
-
-            # Populate tree
-            for path in sorted_paths:
-                group_id = tree.insert("", tk.END, text=path, open=True)
+            for path in sorted(groups.keys()):
+                group_item = QTreeWidgetItem(tree, [path])
+                group_item.setExpanded(True)
                 for req in groups[path]:
-                    tree.insert(group_id, tk.END, text=f"{req['method']}  {req['name']}",
-                                values=[req["id"]], tags=("request",))
+                    item = QTreeWidgetItem(group_item, [f"{req['method']}  {req['name']}"])
+                    item.setData(0, Qt.UserRole, req["id"])
+                    item.setFlags(item.flags() | Qt.ItemIsSelectable)
 
-            # Ungrouped requests
             if ungrouped:
-                group_id = tree.insert("", tk.END, text="(no folder)", open=True)
+                group_item = QTreeWidgetItem(tree, ["(no folder)"])
+                group_item.setExpanded(True)
                 for req in ungrouped:
-                    tree.insert(group_id, tk.END, text=f"{req['method']}  {req['name']}",
-                                values=[req["id"]], tags=("request",))
+                    item = QTreeWidgetItem(group_item, [f"{req['method']}  {req['name']}"])
+                    item.setData(0, Qt.UserRole, req["id"])
 
-            # Find and select the currently saved request
+            # Select the currently saved request
             saved_id = self.model.config.get("request_id")
             if saved_id is not None:
-                _select_by_id(tree, saved_id)
+                # MatchRecursive is required: without it findItems only walks
+                # top-level items, which are the folder rows and carry no id,
+                # so the saved request was never pre-selected.
+                it = tree.findItems("", Qt.MatchContains | Qt.MatchRecursive)
+                for item in it:
+                    if item.data(0, Qt.UserRole) == saved_id:
+                        tree.setCurrentItem(item)
+                        tree.scrollToItem(item)
+                        break
 
-            # Highlight current selection
-            tree.tag_configure("selected", background="#3b82f6", foreground="white")
-            self._popup_tree = tree
             self._popup_result = None
 
-            def _on_select(event):
-                sel = tree.selection()
-                if sel:
-                    item = tree.item(sel[0])
-                    if item["values"]:
-                        self._popup_result = item["values"][0]
+            def _on_select():
+                current = tree.currentItem()
+                if current is not None:
+                    data = current.data(0, Qt.UserRole)
+                    if data is not None:
+                        self._popup_result = data
 
-            tree.bind("<<TreeviewSelect>>", _on_select)
-
-            def _on_double_click(event):
-                if self._popup_result is not None:
-                    req = next((r for r in self._request_list if r["id"] == self._popup_result), None)
-                    if req:
-                        _save_selection(req)
-                    popup.destroy()
-
-            tree.bind("<Double-1>", _on_double_click)
-
-            # Button bar
-            btn_frame = ttk.Frame(popup)
-            btn_frame.pack(fill=tk.X, padx=8, pady=(4, 8))
+            def _on_double_click(item, _col):
+                req = next((r for r in self._request_list if r["id"] == item.data(0, Qt.UserRole)), None)
+                if req:
+                    _save_selection(req)
+                dlg.accept()
 
             def _on_ok():
                 if self._popup_result is not None:
                     req = next((r for r in self._request_list if r["id"] == self._popup_result), None)
                     if req:
                         _save_selection(req)
-                popup.destroy()
+                dlg.accept()
 
             def _on_clear():
                 self.model.config["request_id"] = None
-                selected_display.set("")
-                if on_change:
-                    on_change()
-                popup.destroy()
+                selected_display.setText("")
+                _notify_change()
+                dlg.accept()
 
-            ttk.Button(btn_frame, text="Clear", command=_on_clear).pack(side=tk.LEFT)
-            ttk.Button(btn_frame, text="Cancel", command=popup.destroy).pack(side=tk.RIGHT, padx=(4, 0))
-            ttk.Button(btn_frame, text="OK", command=_on_ok).pack(side=tk.RIGHT)
+            tree.itemSelectionChanged.connect(_on_select)
+            tree.itemDoubleClicked.connect(_on_double_click)
 
-        def _select_by_id(tree, req_id):
-            """Expand and select the tree item matching the given request id."""
-            for group_id in tree.get_children():
-                for child_id in tree.get_children(group_id):
-                    values = tree.item(child_id, "values")
-                    if values and values[0] == req_id:
-                        tree.see(child_id)
-                        tree.selection_set(child_id)
-                        return
+            btn_frame = QWidget(dlg)
+            bh = QHBoxLayout(btn_frame)
+            bh.setContentsMargins(0, 0, 0, 0)
+            clear_btn = QPushButton("Clear", btn_frame)
+            clear_btn.clicked.connect(_on_clear)
+            bh.addWidget(clear_btn)
+            bh.addStretch(1)
+            cancel_btn = QPushButton("Cancel", btn_frame)
+            cancel_btn.clicked.connect(dlg.reject)
+            bh.addWidget(cancel_btn)
+            ok_btn = QPushButton("OK", btn_frame)
+            style_role(ok_btn, "primary")
+            ok_btn.clicked.connect(_on_ok)
+            bh.addWidget(ok_btn)
+            vl.addWidget(btn_frame)
 
-        def _show_hide_picker(*args):
-            if source_var.get() == "collection":
-                picker_frame.grid()
-                _populate_requests()
-            else:
-                picker_frame.grid_remove()
+            dlg.exec_()
 
-        source_var.trace_add("write", _show_hide_picker)
-        source_var.trace_add("write", lambda *a: self.model.config.update({"source": source_var.get()}) or (on_change and on_change()))
-
-        row += 2  # skip picker row for inline fields
+        browse_btn.clicked.connect(_show_tree_popup)
+        row += 1
 
         # ---- Inline config fields ----
-        self._inline_fields = inline_fields = ttk.Frame(frame)
-        inline_fields.grid(row=row, column=0, columnspan=2, sticky="ew", padx=0, pady=0)
-        inline_fields.columnconfigure(1, weight=1)
+        inline_fields = QWidget(frame)
+        il = QGridLayout(inline_fields)
+        il.setContentsMargins(0, 0, 0, 0)
+        il.setHorizontalSpacing(6)
+        il.setVerticalSpacing(4)
         irow = 0
 
-        ttk.Label(inline_fields, text="Method:").grid(row=irow, column=0, sticky="w", padx=2, pady=2)
-        method_var = tk.StringVar(value=self.model.config.get("method", "GET"))
-        method_box = ttk.Combobox(inline_fields, textvariable=method_var,
-                                  values=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
-                                  state="readonly", width=10)
-        method_box.grid(row=irow, column=1, sticky="ew", padx=2, pady=2)
-
-        def on_method_change(*args):
-            self.model.config["method"] = method_var.get()
-            if on_change:
-                on_change()
-
-        method_var.trace_add("write", on_method_change)
+        il.addWidget(QLabel("Method:", inline_fields), irow, 0)
+        method_box = QComboBox(inline_fields)
+        method_box.addItems(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"])
+        method_box.setCurrentText(self.model.config.get("method", "GET"))
+        method_box.currentTextChanged.connect(
+            lambda text: (self.model.config.__setitem__("method", text), _notify_change())
+        )
+        il.addWidget(method_box, irow, 1)
         irow += 1
 
-        ttk.Label(inline_fields, text="URL:").grid(row=irow, column=0, sticky="w", padx=2, pady=2)
-        url_var = tk.StringVar(value=self.model.config.get("url", ""))
-        url_entry = ttk.Entry(inline_fields, textvariable=url_var)
-        url_entry.grid(row=irow, column=1, sticky="ew", padx=2, pady=2)
-
-        def on_url_change(*args):
-            self.model.config["url"] = url_var.get()
-            if on_change:
-                on_change()
-
-        url_var.trace_add("write", on_url_change)
+        il.addWidget(QLabel("URL:", inline_fields), irow, 0)
+        url_entry = QLineEdit(inline_fields)
+        url_entry.setText(self.model.config.get("url", ""))
+        url_entry.textChanged.connect(
+            lambda text: (self.model.config.__setitem__("url", text), _notify_change())
+        )
+        il.addWidget(url_entry, irow, 1)
         irow += 1
 
-        # Headers
-        ttk.Label(inline_fields, text="Headers (JSON):").grid(row=irow, column=0, sticky="nw", padx=2, pady=2)
-        headers_text = ScrolledText(inline_fields, width=30, height=4)
+        il.addWidget(QLabel("Headers (JSON):", inline_fields), irow, 0)
+        headers_text = QPlainTextEdit(inline_fields)
+        headers_text.setFixedHeight(90)
         headers_val = self.model.config.get("headers", {})
         if isinstance(headers_val, dict):
-            headers_text.insert("1.0", json.dumps(headers_val, indent=2))
+            headers_text.setPlainText(json.dumps(headers_val, indent=2))
         else:
-            headers_text.insert("1.0", str(headers_val))
-        headers_text.grid(row=irow, column=1, sticky="ew", padx=2, pady=2)
+            headers_text.setPlainText(str(headers_val))
 
-        def on_headers_change(*args):
+        def on_headers_change():
             try:
-                self.model.config["headers"] = json.loads(headers_text.get("1.0", "end-1c"))
+                self.model.config["headers"] = json.loads(headers_text.toPlainText())
             except json.JSONDecodeError:
-                self.model.config["headers"] = headers_text.get("1.0", "end-1c")
-            if on_change:
-                on_change()
+                self.model.config["headers"] = headers_text.toPlainText()
+            _notify_change()
 
-        headers_text.bind("<FocusOut>", on_headers_change, add="+")
+        headers_text.textChanged.connect(on_headers_change)
+        il.addWidget(headers_text, irow, 1)
         irow += 1
 
-        # Body
-        ttk.Label(inline_fields, text="Body:").grid(row=irow, column=0, sticky="nw", padx=2, pady=2)
-        body_text = ScrolledText(inline_fields, width=30, height=4)
-        body_val = self.model.config.get("body", "")
-        body_text.insert("1.0", str(body_val))
-        body_text.grid(row=irow, column=1, sticky="ew", padx=2, pady=2)
+        il.addWidget(QLabel("Body:", inline_fields), irow, 0)
+        body_text = QPlainTextEdit(inline_fields)
+        body_text.setFixedHeight(90)
+        body_text.setPlainText(str(self.model.config.get("body", "")))
 
-        def on_body_change(*args):
-            self.model.config["body"] = body_text.get("1.0", "end-1c")
-            if on_change:
-                on_change()
+        def on_body_change():
+            self.model.config["body"] = body_text.toPlainText()
+            _notify_change()
 
-        body_text.bind("<FocusOut>", on_body_change, add="+")
+        body_text.textChanged.connect(on_body_change)
+        il.addWidget(body_text, irow, 1)
+        il.setColumnStretch(1, 1)
+        layout.addWidget(inline_fields, row, 0, 1, 2)
+        layout.setRowStretch(row, 1)
 
-        def _show_hide_inline(*args):
-            if source_var.get() == "collection":
-                inline_fields.grid_remove()
-            else:
-                inline_fields.grid()
-
-        source_var.trace_add("write", _show_hide_inline)
-
-        # Initial state
-        if source_var.get() == "collection":
-            inline_fields.grid_remove()
+        # Initial visibility
+        picker_frame.setVisible(radio_collection.isChecked())
+        inline_fields.setVisible(not radio_collection.isChecked())
+        if radio_collection.isChecked():
             _populate_requests()
-        else:
-            picker_frame.grid_remove()
 
         return frame
 
@@ -458,24 +462,25 @@ class ConditionNode(BaseNode):
             return {"branch": False, "error": str(e)}
 
     def get_config_frame(self, master, on_change=None, **kwargs):
-        frame = ttk.Frame(master)
-        frame.columnconfigure(0, weight=1)
+        frame = QWidget(master)
+        layout = QVBoxLayout(frame)
+        layout.setContentsMargins(2, 2, 2, 2)
 
-        ttk.Label(frame, text="Expression (Python):").grid(row=0, column=0, sticky="w", padx=2, pady=2)
-        ttk.Label(frame, text="Use: context[node_id]['field']", foreground="gray").grid(
-            row=1, column=0, sticky="w", padx=2, pady=1)
+        layout.addWidget(QLabel("Expression (Python):", frame))
+        hint = QLabel("Use: context[node_id]['field']", frame)
+        hint.setStyleSheet("color: gray;")
+        layout.addWidget(hint)
 
         editor = CodeEditor(frame)
-        editor.insert("1.0", self.model.config.get("expression", ""))
-        editor.grid(row=2, column=0, sticky="nsew", padx=2, pady=2)
-        frame.rowconfigure(2, weight=1)
+        editor.setPlainText(self.model.config.get("expression", ""))
 
-        def on_change_handler(*args):
-            self.model.config["expression"] = editor.get("1.0", "end-1c")
+        def on_change_handler():
+            self.model.config["expression"] = editor.toPlainText()
             if on_change:
                 on_change()
 
-        editor.bind("<FocusOut>", on_change_handler, add="+")
+        editor.textChanged.connect(on_change_handler)
+        layout.addWidget(editor, 1)
         return frame
 
 
@@ -502,24 +507,25 @@ class ScriptNode(BaseNode):
             return {"error": str(e)}
 
     def get_config_frame(self, master, on_change=None, **kwargs):
-        frame = ttk.Frame(master)
-        frame.columnconfigure(0, weight=1)
+        frame = QWidget(master)
+        layout = QVBoxLayout(frame)
+        layout.setContentsMargins(2, 2, 2, 2)
 
-        ttk.Label(frame, text="Python Script:").grid(row=0, column=0, sticky="w", padx=2, pady=2)
-        ttk.Label(frame, text="Available: context, console, output", foreground="gray").grid(
-            row=1, column=0, sticky="w", padx=2, pady=1)
+        layout.addWidget(QLabel("Python Script:", frame))
+        hint = QLabel("Available: context, console, output", frame)
+        hint.setStyleSheet("color: gray;")
+        layout.addWidget(hint)
 
         editor = CodeEditor(frame)
-        editor.insert("1.0", self.model.config.get("script", ""))
-        editor.grid(row=2, column=0, sticky="nsew", padx=2, pady=2)
-        frame.rowconfigure(2, weight=1)
+        editor.setPlainText(self.model.config.get("script", ""))
 
-        def on_change_handler(*args):
-            self.model.config["script"] = editor.get("1.0", "end-1c")
+        def on_change_handler():
+            self.model.config["script"] = editor.toPlainText()
             if on_change:
                 on_change()
 
-        editor.bind("<FocusOut>", on_change_handler, add="+")
+        editor.textChanged.connect(on_change_handler)
+        layout.addWidget(editor, 1)
         return frame
 
 
@@ -540,23 +546,28 @@ class DelayNode(BaseNode):
         return {"status": "delayed", "seconds": seconds}
 
     def get_config_frame(self, master, on_change=None, **kwargs):
-        frame = ttk.Frame(master)
-        ttk.Label(frame, text="Seconds:").pack(side=tk.LEFT, padx=2, pady=5)
+        frame = QWidget(master)
+        layout = QHBoxLayout(frame)
+        layout.setContentsMargins(2, 4, 2, 4)
 
-        seconds_var = tk.StringVar(value=str(self.model.config.get("seconds", 1.0)))
-        spinbox = ttk.Spinbox(frame, from_=0.1, to=3600.0, increment=0.5,
-                              textvariable=seconds_var, width=10)
-        spinbox.pack(side=tk.LEFT, padx=2, pady=5)
+        layout.addWidget(QLabel("Seconds:", frame))
+        spinbox = QDoubleSpinBox(frame)
+        spinbox.setRange(0.1, 3600.0)
+        spinbox.setSingleStep(0.5)
+        spinbox.setDecimals(2)
+        spinbox.setValue(float(self.model.config.get("seconds", 1.0)))
 
-        def on_change(*args):
-            try:
-                self.model.config["seconds"] = float(seconds_var.get())
-            except ValueError:
-                pass
+        # Must not be called on_change: an inner def with that name rebinds the
+        # enclosing `on_change` parameter, so `if on_change: on_change()` ended
+        # up calling itself with a missing argument (TypeError inside a Qt slot).
+        def on_seconds_change(value):
+            self.model.config["seconds"] = float(value)
             if on_change:
                 on_change()
 
-        seconds_var.trace_add("write", on_change)
+        spinbox.valueChanged.connect(on_seconds_change)
+        layout.addWidget(spinbox)
+        layout.addStretch(1)
         return frame
 
 
@@ -577,23 +588,26 @@ class LogNode(BaseNode):
         return {"logged": message}
 
     def get_config_frame(self, master, on_change=None, **kwargs):
-        frame = ttk.Frame(master)
-        frame.columnconfigure(0, weight=1)
+        frame = QWidget(master)
+        layout = QVBoxLayout(frame)
+        layout.setContentsMargins(2, 2, 2, 2)
 
-        ttk.Label(frame, text="Template:").grid(row=0, column=0, sticky="w", padx=2, pady=2)
-        ttk.Label(frame, text="Use {{ context.node_id.field }} for variable substitution",
-                  foreground="gray").grid(row=1, column=0, sticky="w", padx=2, pady=1)
+        layout.addWidget(QLabel("Template:", frame))
+        hint = QLabel("Use {{ context.node_id.field }} for variable substitution", frame)
+        hint.setStyleSheet("color: gray;")
+        layout.addWidget(hint)
 
-        template_var = tk.StringVar(value=self.model.config.get("template", ""))
-        entry = ttk.Entry(frame, textvariable=template_var)
-        entry.grid(row=2, column=0, sticky="ew", padx=2, pady=2)
+        entry = QLineEdit(frame)
+        entry.setText(self.model.config.get("template", ""))
 
-        def on_change(*args):
-            self.model.config["template"] = template_var.get()
+        # See DelayNode: naming this `on_change` shadowed the callback parameter.
+        def on_template_change(text):
+            self.model.config["template"] = text
             if on_change:
                 on_change()
 
-        template_var.trace_add("write", on_change)
+        entry.textChanged.connect(on_template_change)
+        layout.addWidget(entry)
         return frame
 
 
@@ -624,24 +638,25 @@ class DataTransformNode(BaseNode):
             return {"error": str(e)}
 
     def get_config_frame(self, master, on_change=None, **kwargs):
-        frame = ttk.Frame(master)
-        frame.columnconfigure(0, weight=1)
+        frame = QWidget(master)
+        layout = QVBoxLayout(frame)
+        layout.setContentsMargins(2, 2, 2, 2)
 
-        ttk.Label(frame, text="Expression (Python):").grid(row=0, column=0, sticky="w", padx=2, pady=2)
-        ttk.Label(frame, text="context contains all upstream node outputs", foreground="gray").grid(
-            row=1, column=0, sticky="w", padx=2, pady=1)
+        layout.addWidget(QLabel("Expression (Python):", frame))
+        hint = QLabel("context contains all upstream node outputs", frame)
+        hint.setStyleSheet("color: gray;")
+        layout.addWidget(hint)
 
         editor = CodeEditor(frame)
-        editor.insert("1.0", self.model.config.get("expression", ""))
-        editor.grid(row=2, column=0, sticky="nsew", padx=2, pady=2)
-        frame.rowconfigure(2, weight=1)
+        editor.setPlainText(self.model.config.get("expression", ""))
 
-        def on_change_handler(*args):
-            self.model.config["expression"] = editor.get("1.0", "end-1c")
+        def on_change_handler():
+            self.model.config["expression"] = editor.toPlainText()
             if on_change:
                 on_change()
 
-        editor.bind("<FocusOut>", on_change_handler, add="+")
+        editor.textChanged.connect(on_change_handler)
+        layout.addWidget(editor, 1)
         return frame
 
 
