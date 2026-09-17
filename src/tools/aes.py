@@ -49,6 +49,11 @@ class AesGui:
         grid.addWidget(QLabel("Key:", frame1), 0, 2)
         self.entry2 = QLineEdit(frame1)
         grid.addWidget(self.entry2, 0, 3)
+        key_btn = QPushButton("Random", frame1)
+        style_role(key_btn, "info")
+        key_btn.setToolTip("Fill Key with random bytes for the selected key size")
+        key_btn.clicked.connect(self._random_key)
+        grid.addWidget(key_btn, 0, 4)
 
         grid.addWidget(QLabel("Padding:", frame1), 1, 0)
         self.padding_box = QComboBox(frame1)
@@ -108,6 +113,16 @@ class AesGui:
 
     def _random_iv(self):
         self.entry3.setText(secrets.token_hex(8))
+
+    def _random_key(self):
+        """Fill the key with random bytes matching the selected key size.
+
+        ``token_hex`` returns two characters per byte, so half the key length
+        gives exactly 16, 24 or 32 ASCII characters — always valid UTF-8 and
+        exactly what ``_resolve_key`` expects.
+        """
+        size = KEY_SIZES[self.blocksize_box.currentText()]
+        self.entry2.setText(secrets.token_hex(size // 2))
 
     def _resolve_key(self):
         """Return the key bytes for the current settings, or None (dialog shown).
