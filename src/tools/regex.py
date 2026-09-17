@@ -1,7 +1,13 @@
 import re
 import signal
+import tempfile
 import threading
+import webbrowser
+from html import escape
+from pathlib import Path
 
+from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QFontDatabase, QGuiApplication
 from PyQt5.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -12,8 +18,10 @@ from PyQt5.QtWidgets import (
     QPlainTextEdit,
     QGroupBox,
     QPushButton,
+    QTextBrowser,
 )
 
+from ..qui import show_error
 from ..theme import style_role
 
 # A pathological pattern (nested quantifiers such as ``(a+)+b``) backtracks
@@ -136,14 +144,14 @@ class RegexWindow:
             self.result_text.appendPlainText(line)
 
 
-class CommonlyUsed:
-    def __init__(self, master=None):
-        self.root = QWidget(master)
-        outer = QVBoxLayout(self.root)
-        outer.setContentsMargins(0, 0, 0, 0)
+# ---------------------------------------------------------------------------
+# Commonly used expressions, shown as a rendered HTML page
+# ---------------------------------------------------------------------------
 
-        st = QPlainTextEdit(self.root)
-        st.setPlainText(r"""常用正则表达式
+# The reference text stays the source of truth: it is what the tab showed
+# before, and the page below is generated from it rather than hand-copied, so
+# no expression can be lost or misspelled in translation.
+COMMON_REGEX_TEXT = r"""常用正则表达式
 一、校验数字的表达式
 数字：^[0-9]*$
 n位的数字：^\d{n}$
@@ -207,9 +215,351 @@ xml文件：^([a-zA-Z]+-?)+[a-zA-Z0-9]+\.[x|X][m|M][l|L]$
 中文字符的正则表达式：[\u4e00-\u9fa5]
 双字节字符：[^\x00-\xff] (包括汉字在内，可以用来计算字符串的长度(一个双字节字符长度计2，ASCII字符计1))
 空白行的正则表达式：\n\s*\r (可以用来删除空白行)
-HTML标记的正则表达式：<(\S*?)[^>]*>.*?|<.*? /> ( 首尾空白字符的正则表达式：^\s*|\s*$或(^\s*)|(\s*$) (可以用来删除行首行尾的空白字符(包括空格、制表符、换页符等等)，非常有用的表达式)
+HTML标记的正则表达式：<(\S*?)[^>]*>.*?|<.*? />
+首尾空白字符的正则表达式：^\s*|\s*$ 或 (^\s*)|(\s*$) (可以用来删除行首行尾的空白字符(包括空格、制表符、换页符等等)，非常有用的表达式)
 腾讯QQ号：[1-9][0-9]{4,} (腾讯QQ号从10000开始)
 中国邮政编码：[1-9]\d{5}(?!\d) (中国邮政编码为6位数字)
-IPv4地址：((2(5[0-5]|[0-4]\d))|[0-1]?\d{1,2})(\.((2(5[0-5]|[0-4]\d))|[0-1]?\d{1,2})){3}""")
-        st.setReadOnly(True)
-        outer.addWidget(st)
+IPv4地址：((2(5[0-5]|[0-4]\d))|[0-1]?\d{1,2})(\.((2(5[0-5]|[0-4]\d))|[0-1]?\d{1,2})){3}"""
+
+# Expressions that are really a sentence with an expression glued on the end
+# ("备注：这就是最终结果了…") carry nothing to copy; they become page notes.
+_NOTE_NAMES = {"备注"}
+
+# One line often offers several spellings of the same expression.
+_ALTERNATIVE_RE = re.compile(r"\s+或\s+")
+
+
+def _is_balanced(text):
+    """True when every '(' in `text` is closed, in order."""
+    depth = 0
+    for char in text:
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth < 0:
+                return False
+    return depth == 0
+
+
+def _trailing_note(body):
+    """Split a trailing '(...)' remark off an expression body.
+
+    A greedy ``\\s+\\((.*)\\)$`` gets this wrong twice over: the remark is not
+    always the outermost group (``双字节字符：[^\\x00-\\xff] (包括…(一个双字节
+    字符长度计2，ASCII字符计1))``) and an expression may itself contain a
+    space before a group (``首尾空白字符的正则表达式：^\\s*|\\s*$ 或 (^\\s*)|(\\s*$)
+    (可以用来…）``), which the greedy form swallowed into the note.  The
+    rightmost *balanced* group is taken instead, and the remark is only
+    stripped when the text after it is balanced — i.e. when it really is a
+    remark and not the tail of an expression.
+    """
+    for match in reversed(list(re.finditer(r"\s+\(", body))):
+        tail = body[match.start() + 1 :]
+        if tail.endswith(")") and _is_balanced(tail):
+            return body[: match.start()].strip(), tail[1:-1].strip()
+    return body.strip(), ""
+
+
+def _split_head(line):
+    """Return (name, body) for a '名称：正则' line, or None for a heading.
+
+    The full-width colon is searched over the whole line before the half-width
+    one: in ``有四种钱的表示形式我们可以接受:"10000.00" 和 "10,000.00"…：^[1-9][0-9]*$``
+    a left-to-right search for either colon would cut the line at the colon
+    inside the prose (position 15) instead of the real separator (position 70).
+    """
+    for separator in ("：", ":"):
+        index = line.find(separator)
+        if index >= 0:
+            name, body = line[:index].strip(), line[index + 1 :].strip()
+            return (name, body) if body else None
+    return None
+
+
+def parse_common_regexes(text=COMMON_REGEX_TEXT):
+    """Group the reference text into sections of copyable expressions.
+
+    Returns ``[{"title": str, "items": [{"name", "patterns", "note"}], "notes": [str]}, ...]``.
+    """
+    sections = []
+    current = None
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        head = _split_head(line)
+        if head is None:
+            # A heading: the document title, "一、校验数字的表达式", or
+            # "钱的输入格式：" (a heading whose colon is followed by nothing).
+            current = {"title": line, "items": [], "notes": []}
+            sections.append(current)
+            continue
+        if current is None:
+            current = {"title": "", "items": [], "notes": []}
+            sections.append(current)
+        name, body = head
+        if name in _NOTE_NAMES:
+            current["notes"].append(body)
+            continue
+        body, note = _trailing_note(body)
+        patterns = [part for part in (p.strip() for p in _ALTERNATIVE_RE.split(body)) if part]
+        current["items"].append({"name": name, "patterns": patterns, "note": note})
+    return sections
+
+
+# ---------------------------------------------------------------------------
+# Building the page
+# ---------------------------------------------------------------------------
+# The page is rendered by Qt's rich-text engine in the tab (and by a real
+# browser on request), so the markup sticks to what both understand: tables,
+# bgcolor, inline styles and anchors.  No JavaScript is needed in the tab —
+# a copy button is an ordinary `copy:<index>` link whose click is handled in
+# Python, which is what makes the buttons work without a Chromium backend.
+def _mono_style(for_browser):
+    """A monospace style for one expression.
+
+    The two renderers want different things: a browser resolves font fallbacks
+    itself, while Qt treats an unknown family as a request to populate its font
+    aliases — measured at ~1 s on macOS for "Consolas" or even the generic
+    "Monospace" — so the page rendered in the tab names the platform's real
+    fixed font instead.
+    """
+    if for_browser:
+        return "font-family:Menlo,Consolas,'Courier New',monospace;"
+    # No QApplication (the page can be built without one) means no font
+    # database, and an empty family would emit a useless `font-family:'';`.
+    family = QFontDatabase.systemFont(QFontDatabase.FixedFont).family()
+    return f"font-family:'{family}';" if family else ""
+
+
+_CHIP = (
+    "text-decoration:none; color:#0a5ad6; background-color:#e8f0fe;"
+    "white-space:nowrap;"
+)
+_MUTED = "color:#57606a;"
+# Only the header row carries a background.  Qt's rich-text engine applies a
+# background to the block it is written on and not to nested inline tags — a
+# background on a cell or a `<div>` disappears behind a `<b>`, verified against
+# the document's fragment formats — so a shaded description column rendered as
+# a highlighter smear in the tab while looking like a full column in a browser.
+_HEAD_BG = "#eef1f4"
+
+
+def _copy_link(index, pattern, for_browser):
+    """A '复制' chip for one expression, as a link the Python side intercepts."""
+    if for_browser:
+        # In a browser there is no Python to catch the click, so the same
+        # anchor carries a JS handler; `copy:` stays as a harmless fallback.
+        return (
+            f'<a href="copy:{index}" data-pattern="{escape(pattern, quote=True)}"'
+            f' onclick="copyPattern(this); return false;" style="{_CHIP}">&nbsp;复制&nbsp;</a>'
+        )
+    return f'<a href="copy:{index}" style="{_CHIP}">&nbsp;复制&nbsp;</a>'
+
+
+_BROWSER_SCRIPT = """
+<script>
+function copyPattern(el) {
+  var text = el.getAttribute('data-pattern');
+  var done = function () {
+    el.textContent = '已复制';
+    setTimeout(function () { el.textContent = '复制'; }, 1200);
+  };
+  var legacy = function () {
+    var area = document.createElement('textarea');
+    area.value = text;
+    area.setAttribute('readonly', '');
+    area.style.position = 'fixed';
+    area.style.top = '-1000px';
+    document.body.appendChild(area);
+    area.select();
+    var ok = false;
+    // file:// pages are not a secure context everywhere, so the clipboard API
+    // is not always available and the old selection trick is the fallback.
+    try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+    document.body.removeChild(area);
+    el.textContent = ok ? '已复制' : '复制失败';
+    setTimeout(function () { el.textContent = '复制'; }, 1200);
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(done, legacy);
+  } else {
+    legacy();
+  }
+}
+</script>
+"""
+
+
+def build_common_regex_page(for_browser=False):
+    """Return ``(html, patterns)``: the reference page, and its expressions.
+
+    ``patterns[i]`` is the text copied by the ``copy:i`` link, which keeps
+    long or quote-laden expressions out of the href.
+    """
+    sections = parse_common_regexes()
+    patterns = []
+    mono = _mono_style(for_browser)
+
+    # The first block is the document title ("常用正则表达式") — a heading with
+    # nothing under it — and becomes the page heading rather than a section.
+    title = "常用正则表达式"
+    if sections and not sections[0]["items"] and not sections[0]["notes"]:
+        title = sections[0]["title"] or title
+
+    blocks = [
+        f'<div style="font-size:18px; font-weight:bold; color:#1f2328;">{escape(title)}</div>'
+    ]
+    body = []
+    for section in sections:
+        if not section["items"] and not section["notes"]:
+            continue
+        heading = section["title"].rstrip("：:").strip()
+        body.append(
+            f'<div style="font-size:15px; font-weight:bold; color:#1f2328;'
+            f' margin-top:18px; margin-bottom:6px;">{escape(heading)}</div>'
+        )
+        rows = [
+            f'<tr bgcolor="{_HEAD_BG}">'
+            f'<td width="34%"><div style="background-color:{_HEAD_BG}; {_MUTED}">说明</div></td>'
+            f'<td><div style="background-color:{_HEAD_BG}; {_MUTED}">正则表达式</div></td></tr>'
+        ]
+        for item in section["items"]:
+            cells = []
+            for pattern in item["patterns"]:
+                index = len(patterns)
+                patterns.append(pattern)
+                cells.append(
+                    f'<div style="{mono} font-size:12px; margin-bottom:2px;">'
+                    f"{escape(pattern)}&nbsp;&nbsp;{_copy_link(index, pattern, for_browser)}</div>"
+                )
+            name = escape(item["name"])
+            note = f'<div style="{_MUTED} font-size:11px;">{escape(item["note"])}</div>' if item["note"] else ""
+            rows.append(
+                f'<tr><td width="34%"><div><b>{name}</b>{note}</div></td>'
+                f'<td>{"".join(cells)}</td></tr>'
+            )
+        for note in section["notes"]:
+            rows.append(
+                f'<tr><td colspan="2"><div style="{_MUTED} font-size:12px;">{escape(note)}</div>'
+                "</td></tr>"
+            )
+        body.append(
+            '<table width="100%" cellspacing="0" cellpadding="6">' + "".join(rows) + "</table>"
+        )
+
+    blocks.append(
+        f'<div style="{_MUTED} margin-bottom:10px;">共 {len(patterns)} 条表达式，'
+        f"点击每条后面的“复制”即可复制该正则。</div>"
+    )
+    blocks.extend(body)
+
+    if for_browser:
+        # A standalone document: the browser needs the charset and the script.
+        html = (
+            "<!DOCTYPE html>\n<html lang=\"zh-CN\">\n<head>\n"
+            '<meta charset="utf-8">\n'
+            f"<title>{escape(title)}</title>\n"
+            f"{_BROWSER_SCRIPT}"
+            "<style>body{max-width:1000px;margin:24px auto;padding:0 16px;"
+            "font-family:-apple-system,'Helvetica Neue','PingFang SC','Microsoft YaHei',sans-serif;"
+            "color:#1f2328;}table{border-collapse:collapse;}"
+            "td{padding:6px 8px;vertical-align:top;}a:hover{background:#d3e3fd;}"
+            "</style>\n</head>\n<body>\n"
+            + "\n".join(blocks)
+            + "\n</body>\n</html>\n"
+        )
+    else:
+        html = "\n".join(blocks)
+    return html, patterns
+
+
+class CommonlyUsed:
+    """Common regular expressions, shown as a rendered HTML page.
+
+    Every expression is followed by a 复制 button.  The click is handled here
+    (``copy:`` links, see :meth:`_on_anchor_clicked`) instead of in JavaScript so
+    that the buttons work in Qt's rich-text engine too, where no script runs.
+    """
+
+    def __init__(self, master=None):
+        self.root = QWidget(master)
+        outer = QVBoxLayout(self.root)
+        outer.setContentsMargins(5, 5, 5, 5)
+        outer.setSpacing(4)
+
+        # Kept: the page's copy links index into this list.
+        html, self.patterns = build_common_regex_page()
+
+        bar = QHBoxLayout()
+        bar.addStretch(1)
+        browser_button = QPushButton("在浏览器中打开", self.root)
+        style_role(browser_button, "secondary")
+        browser_button.setToolTip("把同一页面写入临时 HTML 文件，并用系统默认浏览器打开")
+        browser_button.clicked.connect(self.open_in_browser)
+        bar.addWidget(browser_button)
+        outer.addLayout(bar)
+
+        view = QTextBrowser(self.root)
+        view.setReadOnly(True)
+        # Both off: a `copy:` click must reach anchorClicked() instead of being
+        # treated as navigation the view cannot perform.
+        view.setOpenLinks(False)
+        view.setOpenExternalLinks(False)
+        view.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.LinksAccessibleByMouse)
+        view.anchorClicked.connect(self._on_anchor_clicked)
+        view.setHtml(html)
+        outer.addWidget(view, 1)
+
+        self.view = view
+        self.status = QLabel("", self.root)
+        self.status.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        outer.addWidget(self.status)
+
+    # ------------------------------------------------------------------
+    # Copy buttons
+    # ------------------------------------------------------------------
+    def _on_anchor_clicked(self, url):
+        """Copy the expression behind a ``copy:<index>`` link."""
+        if url.scheme() != "copy":
+            if url.scheme() in ("http", "https"):
+                webbrowser.open(url.toString())
+            return
+        try:
+            index = int(url.path())
+        except ValueError:
+            return
+        if not 0 <= index < len(self.patterns):
+            return
+        pattern = self.patterns[index]
+        QGuiApplication.clipboard().setText(pattern)
+        self.status.setText(f"已复制：{pattern}")
+
+    # ------------------------------------------------------------------
+    # Full-fidelity page in a real browser
+    # ------------------------------------------------------------------
+    def browser_page_path(self):
+        """Write the browser edition of the page and return its path.
+
+        The file is left on disk on purpose: the browser reads it after this
+        call returns, so it cannot be removed here.  The name is unique per
+        process, so repeated clicks do not collide with a page still loading.
+        """
+        html, _ = build_common_regex_page(for_browser=True)
+        handle = tempfile.NamedTemporaryFile(
+            "w", suffix=".html", prefix="apitest-common-regex-",
+            delete=False, encoding="utf-8",
+        )
+        with handle:
+            handle.write(html)
+        return handle.name
+
+    def open_in_browser(self):
+        try:
+            path = self.browser_page_path()
+        except OSError as e:
+            show_error(self.root, "Error", str(e))
+            return
+        webbrowser.open(Path(path).as_uri())
+        self.status.setText(f"已在浏览器中打开：{path}")
